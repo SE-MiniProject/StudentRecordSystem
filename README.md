@@ -59,6 +59,19 @@ Student Record System
     Submit Assignment)
  Database
 
+## Repository layout
+
+```
+client/     Qt Widgets desktop app (CMake, Qt 5.15)
+server/     C++ REST server (CMake)
+db/         PostgreSQL schema — pure SQL
+  migrations/  numbered, applied in order
+  seeds/       reference_dataset.sql (benchmark set) · demo_data.sql (small demo set)
+  checks/      sanity.sql
+docs/       SRS, SAD, test plan, sprint plan, diagrams, templates
+```
+
+Inside `client/` and `server/`, the module folders (`login/`, `auth/`, `students/`, …) are created together with their first real source file — nothing empty is committed beyond the top-level lanes.
 
 ## Project Management
 
