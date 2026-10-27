@@ -1,0 +1,35 @@
+name: server
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "server/**"
+      - ".github/workflows/server.yml"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S server -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke test
+        run: |
+          PORT=8088 ./build/srs_server &
+          for i in $(seq 1 50); do
+            curl -fsS http://127.0.0.1:8088/health && exit 0
+            sleep 0.2
+          done
+          echo "server did not answer /health"
+          exit 1
