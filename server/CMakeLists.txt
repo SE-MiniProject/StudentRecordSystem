@@ -24,10 +24,20 @@ if(WIN32)
 endif()
 
 add_library(srs_core STATIC
+    src/api/error_response.cpp
     src/api/router.cpp
+    src/auth/login_route.cpp
+    src/auth/password_hash.cpp
+    src/auth/default_user_store.cpp
 )
 target_include_directories(srs_core PUBLIC src)
 target_link_libraries(srs_core PUBLIC srs_options srs_deps)
+
+# OpenSSL provides the CSPRNG and SHA-256. The contract's hash column is
+# algorithm-tagged, so Argon2id can arrive later without a schema change, but
+# the first implementation needs only these two primitives.
+find_package(OpenSSL REQUIRED)
+target_link_libraries(srs_core PUBLIC OpenSSL::Crypto)
 
 add_executable(srs_server src/main.cpp)
 target_link_libraries(srs_server PRIVATE srs_core)
