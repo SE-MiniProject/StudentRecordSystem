@@ -29,6 +29,7 @@ add_library(srs_core STATIC
     src/auth/login_route.cpp
     src/auth/password_hash.cpp
     src/auth/default_user_store.cpp
+    src/validation/validation.cpp
 )
 target_include_directories(srs_core PUBLIC src)
 target_link_libraries(srs_core PUBLIC srs_options srs_deps)
