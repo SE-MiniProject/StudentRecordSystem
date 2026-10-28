@@ -5,26 +5,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Fetch external dependencies.
-include(FetchContent)
+# Headers are vendored under server/third_party (cpp-httplib 0.18.3,
+# nlohmann/json 3.11.3) and exposed through srs_deps below. They are
+# deliberately not fetched at configure time: the build must work offline and
+# from a fresh clone without reaching the network.
+include(FetchContent)  # kept for future dependencies; not used yet
 
-FetchContent_Declare(
-    httplib
-    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG v0.18.3
-)
-
-FetchContent_MakeAvailable(httplib)
-
-FetchContent_Declare(
-    json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.12.0
-)
-
-FetchContent_MakeAvailable(json)
-
-# PostgreSQL C++ client library.
+# PostgreSQL C++ client library. Required, because src/main.cpp talks to the
+# database directly; CI installs libpqxx-dev before configuring.
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PQXX REQUIRED IMPORTED_TARGET libpqxx)
 
@@ -77,9 +65,12 @@ add_library(
     src/api/router.cpp
     src/auth/bearer_token.cpp
     src/auth/login_route.cpp
+    src/auth/logout_route.cpp
     src/auth/password_hash.cpp
     src/auth/rbac.cpp
     src/auth/default_user_store.cpp
+    src/auth/default_session_store.cpp
+    src/validation/validation.cpp
 )
 
 target_include_directories(
@@ -95,8 +86,6 @@ target_link_libraries(
     srs_options
     srs_deps
     OpenSSL::Crypto
-    httplib::httplib
-    nlohmann_json::nlohmann_json
     PkgConfig::PQXX
 )
 
