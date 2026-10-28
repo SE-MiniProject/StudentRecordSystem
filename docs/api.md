@@ -60,6 +60,8 @@ Response `200`:
 
 Unknown username and wrong password both return `401 unauthenticated` with the same body (SR-008). Missing field returns `400`.
 
+After 5 consecutive failed attempts the account is locked and further logins return the same `401 unauthenticated` body, including attempts with the correct password. A successful login clears the counter. See [Account lockout](#account-lockout) for the storage rule.
+
 ### `POST /api/auth/logout` (any authenticated)
 
 Invalidates the presented token. Response `204`. A second call with the same token returns `401`.
@@ -249,6 +251,8 @@ Created in `001_roles_users.sql`.
 | `password_salt` | `text` | not null, 32 hex chars |
 | `password_algo` | `text` | not null, default `'sha256'`, allows a later migration to `'argon2id'` without a schema change |
 | `active` | `boolean` | not null, default `true` |
+| `failed_attempts` | `integer` | not null, default `0`, `check (failed_attempts >= 0)` |
+| `locked_until` | `timestamptz` | nullable; non-null means login is refused until this instant |
 | `created_at` | `timestamptz` | not null, default `now()` |
 | `updated_at` | `timestamptz` | not null, default `now()` |
 | `roll_no` | `text` | nullable, `references students(roll_no) on delete cascade`, `unique` |
@@ -296,6 +300,19 @@ create index sessions_expires_at_idx on sessions (expires_at);
 `username` is indexed for logout-all and cascade on account deactivation. `expires_at` is indexed for the sweep. Idle timeout is `last_seen_at`, absolute expiry is `expires_at` (SR-008). Expired rows are treated as invalid even before the sweep deletes them.
 
 Logout deletes the row. Deactivating an account (`active = false`) deletes all its rows, which is what makes the deactivation immediate rather than advisory.
+
+### Account lockout
+
+
+- `failed_attempts` counts consecutive failures. A wrong password increments it; a successful login resets it to `0`.
+- When the increment reaches `5`, the same write sets `locked_until = now() + 15 minutes` and the attempt is refused.
+- While `locked_until` is in the future, login is refused **before** the password is checked, so a correct password does not get through and does not reset the counter.
+- Lockout expiry is lazy: a request whose `locked_until` has passed clears `failed_attempts` and `locked_until` and proceeds normally. No scheduled job is needed.
+- `active = false` is separate from lockout and is not cleared by time; it is the admin action in `PATCH /api/users/{username}` (F-006).
+- Every lockout response is the generic `401 unauthenticated` body (SR-008). The client is not told whether the account is locked, because that would reveal the username exists.
+- The counter is per-account, not per-IP. Per-IP rate limiting is out of scope for this story.
+
+Both columns live in `001_roles_users.sql`, so `001` carries the whole login contract and the login route needs no follow-up migration.
 
 ### Grades aggregate
 
