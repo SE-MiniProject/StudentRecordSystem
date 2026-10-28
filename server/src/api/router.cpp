@@ -4,6 +4,8 @@
 
 #include "api/error_response.h"
 #include "auth/login_route.h"
+#include "auth/logout_route.h"
+#include "auth/session_store.h"
 #include "auth/user_store.h"
 #include "httplib.h"
 #include "nlohmann/json.hpp"
@@ -66,6 +68,8 @@ void RegisterRoutes(httplib::Server& server) {
     // The default store rejects every login until the users table is wired up.
     // Tests call RegisterLoginRoute directly with a fake.
     RegisterLoginRoute(server, DefaultUserStore());
+    // Likewise rejects every token until the sessions table is wired up.
+    RegisterLogoutRoute(server, DefaultSessionStore());
     RegisterErrorHandler(server);
 }
 

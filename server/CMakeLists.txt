@@ -28,9 +28,11 @@ add_library(srs_core STATIC
     src/api/router.cpp
     src/auth/bearer_token.cpp
     src/auth/login_route.cpp
+    src/auth/logout_route.cpp
     src/auth/password_hash.cpp
     src/auth/rbac.cpp
     src/auth/default_user_store.cpp
+    src/auth/default_session_store.cpp
 )
 target_include_directories(srs_core PUBLIC src)
 target_link_libraries(srs_core PUBLIC srs_options srs_deps)
