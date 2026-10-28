@@ -66,6 +66,7 @@ add_library(
     src/auth/login_route.cpp
     src/auth/password_hash.cpp
     src/auth/default_user_store.cpp
+    src/validation/validation.cpp
 )
 
 target_include_directories(
