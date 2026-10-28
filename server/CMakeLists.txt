@@ -63,9 +63,13 @@ add_library(
     STATIC
     src/api/error_response.cpp
     src/api/router.cpp
+    src/auth/bearer_token.cpp
     src/auth/login_route.cpp
+    src/auth/logout_route.cpp
     src/auth/password_hash.cpp
+    src/auth/rbac.cpp
     src/auth/default_user_store.cpp
+    src/auth/default_session_store.cpp
     src/validation/validation.cpp
 )
 

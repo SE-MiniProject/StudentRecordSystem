@@ -16,6 +16,8 @@ FetchContent_MakeAvailable(googletest)
 add_executable(srs_tests
     test_health.cpp
     test_login.cpp
+    test_logout.cpp
+    test_rbac.cpp
     test_error_handler.cpp
     test_validation.cpp
 )
