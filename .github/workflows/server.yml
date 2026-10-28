@@ -15,6 +15,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The runner image has neither pkg-config nor libpqxx. server/CMakeLists.txt
+      # requires both (src/main.cpp talks to PostgreSQL directly), so install them
+      # before configuring rather than making the dependency optional.
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libpqxx-dev
+
       - name: Configure
         run: cmake -S server -B build -DCMAKE_BUILD_TYPE=Release
 

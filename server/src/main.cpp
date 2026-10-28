@@ -1,5 +1,8 @@
-#include <httplib.h>
-#include <nlohmann/json.hpp>
+// Vendored headers, exposed via srs_deps (server/third_party). Quoted rather
+// than angled so they resolve through the include path, not the system.
+#include "httplib.h"
+#include "nlohmann/json.hpp"
+
 #include <pqxx/pqxx>
 
 #include <cstdlib>
