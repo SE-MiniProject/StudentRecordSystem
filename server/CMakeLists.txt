@@ -26,8 +26,10 @@ endif()
 add_library(srs_core STATIC
     src/api/error_response.cpp
     src/api/router.cpp
+    src/auth/bearer_token.cpp
     src/auth/login_route.cpp
     src/auth/password_hash.cpp
+    src/auth/rbac.cpp
     src/auth/default_user_store.cpp
 )
 target_include_directories(srs_core PUBLIC src)
