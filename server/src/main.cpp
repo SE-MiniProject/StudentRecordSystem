@@ -160,7 +160,7 @@ int main() {
             pqxx::read_transaction tx(conn);
             auto row = tx.exec_params(
                 "SELECT id, roll_no, name, date_of_birth::text AS date_of_birth, department, semester, contact_details "
-                "FROM students WHERE id = $1", *id);
+                "FROM students WHERE id = $1", pqxx::params{*id});
             if (row.empty()) { res.status = 404; res.set_content(error_json("Student not found").dump(), "application/json"); return; }
             res.set_content(student_json(row[0]).dump(), "application/json");
         } catch (const std::exception& e) {
@@ -212,7 +212,7 @@ int main() {
             auto rows = tx.exec_params(
                 "UPDATE students SET name=$1, contact_details=$2, department=$3, semester=$4, updated_at=now() "
                 "WHERE id=$5 RETURNING id, roll_no, name, date_of_birth::text AS date_of_birth, department, semester, contact_details",
-                name, contact, department, semester, *id);
+                pqxx::params{name, contact, department, semester, *id});
             if (rows.empty()) {
                 tx.abort();
                 res.status = 404; res.set_content(error_json("Student not found").dump(), "application/json"); return;
@@ -234,7 +234,7 @@ int main() {
         try {
             pqxx::connection conn(db_url);
             pqxx::work tx(conn);
-            auto rows = tx.exec_params("DELETE FROM students WHERE id=$1 RETURNING roll_no", *id);
+            auto rows = tx.exec_params("DELETE FROM students WHERE id=$1 RETURNING roll_no", pqxx::params{*id});
             if (rows.empty()) {
                 tx.abort();
                 res.status = 404; res.set_content(error_json("Student not found").dump(), "application/json"); return;
