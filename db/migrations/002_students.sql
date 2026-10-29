@@ -22,19 +22,25 @@ CREATE TABLE IF NOT EXISTS students (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- A student has at most one grade per subject. The UNIQUE key is what makes the
+-- seed's ON CONFLICT clause meaningful; without it a re-run inserts duplicates
+-- that no query can distinguish from real repeat grades.
 CREATE TABLE IF NOT EXISTS grades (
     id           BIGSERIAL PRIMARY KEY,
     roll_no      VARCHAR(32) NOT NULL REFERENCES students(roll_no) ON DELETE CASCADE,
     subject_code VARCHAR(32) NOT NULL,
-    score        NUMERIC(3,1) NOT NULL CHECK (score >= 0 AND score <= 10)
+    score        NUMERIC(3,1) NOT NULL CHECK (score >= 0 AND score <= 10),
+    UNIQUE (roll_no, subject_code)
 );
 
+-- One attendance row per student, subject and session date.
 CREATE TABLE IF NOT EXISTS attendance (
     id           BIGSERIAL PRIMARY KEY,
     roll_no      VARCHAR(32) NOT NULL REFERENCES students(roll_no) ON DELETE CASCADE,
     subject_code VARCHAR(32) NOT NULL,
     session_date DATE NOT NULL,
-    present      BOOLEAN NOT NULL DEFAULT false
+    present      BOOLEAN NOT NULL DEFAULT false,
+    UNIQUE (roll_no, subject_code, session_date)
 );
 
 CREATE INDEX IF NOT EXISTS idx_grades_roll_no ON grades(roll_no);

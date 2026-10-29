@@ -54,14 +54,19 @@ ON CONFLICT (roll_no) DO NOTHING;
 -- from 002_students.sql.
 UPDATE users SET roll_no = '1ABC26CS001' WHERE username = 'student' AND roll_no IS NULL;
 
+-- ON CONFLICT makes the seed re-runnable: the UNIQUE keys in 002_students.sql
+-- are what these clauses target, so a second apply is a no-op rather than a
+-- silent duplication of every grade and attendance row.
 INSERT INTO grades (roll_no, subject_code, score) VALUES
     ('1ABC26CS001', 'CS501', 8.5),
     ('1ABC26CS001', 'CS502', 9.0),
-    ('1ABC26CS002', 'CS501', 7.5);
+    ('1ABC26CS002', 'CS501', 7.5)
+ON CONFLICT (roll_no, subject_code) DO NOTHING;
 
 INSERT INTO attendance (roll_no, subject_code, session_date, present) VALUES
     ('1ABC26CS001', 'CS501', '2026-10-20', true),
     ('1ABC26CS001', 'CS501', '2026-10-22', false),
-    ('1ABC26CS002', 'CS501', '2026-10-20', true);
+    ('1ABC26CS002', 'CS501', '2026-10-20', true)
+ON CONFLICT (roll_no, subject_code, session_date) DO NOTHING;
 
 COMMIT;
