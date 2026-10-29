@@ -2,6 +2,8 @@
 #include <QObject>
 #include <QString>
 
+#include "session/Session.h"
+
 class QNetworkAccessManager;
 
 // Talks to the server. All HTTP lives here so screens never build requests.
@@ -11,21 +13,20 @@ public:
     explicit ApiClient(QObject* parent = nullptr);
 
     void setBaseUrl(const QString& url) { baseUrl_ = url; }
-    void setMockMode(bool on) { mock_ = on; }
-    bool mockMode() const { return mock_; }
 
     void login(const QString& username, const QString& password);
-    const QString& token() const { return token_; }
+    const QString& token() const { return session_.token; }
+
+    // Shown when either credential is blank. Shared so the dialog's pre-check and
+    // the server's 400 answer cannot drift apart.
+    static QString missingCredentialsMessage();
 
 signals:
-    void loginSucceeded(const QString& username, const QString& fullName, const QString& role);
+    void loginSucceeded(const Session& session);
     void loginFailed(const QString& message);
 
 private:
-    void mockLogin(const QString& username, const QString& password);
-
     QNetworkAccessManager* net_;
     QString baseUrl_ = QStringLiteral("http://localhost:8080");
-    QString token_;
-    bool mock_ = false;
+    Session session_;
 };
