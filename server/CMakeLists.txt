@@ -17,10 +17,30 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # from a fresh clone without reaching the network.
 include(FetchContent)  # kept for future dependencies; not used yet
 
-# PostgreSQL C++ client library. Required, because src/main.cpp talks to the
-# database directly; CI installs libpqxx-dev before configuring.
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(PQXX REQUIRED IMPORTED_TARGET libpqxx)
+# PostgreSQL C++ client library, pinned to the 8.x API the stores are written
+# against. This is fetched rather than taken from the distro on purpose: Ubuntu
+# 24.04 and 26.04 both ship libpqxx 7.10, whose exec() has no (query, params)
+# overload, so the pg_*_store sources do not compile there. Taking the distro
+# package also made the build depend on the host's exact version, and a partial
+# mismatch (7.10 headers against an 8.x shared library) surfaced as
+# "double free detected in tcache 2" during static initialisation, before main()
+# ran. Fetching one release tag keeps every environment on the same code.
+FetchContent_Declare(
+    libpqxx
+    GIT_REPOSITORY https://github.com/jtv/libpqxx.git
+    GIT_TAG        8.0.2
+    GIT_SHALLOW    TRUE
+)
+# libpqxx's own extras are not part of what this project consumes. Its switches
+# are BUILD_TEST/BUILD_TOOLS; note that BUILD_TESTING is deliberately left
+# alone, because this project reads that same variable to decide whether to
+# build server/tests, and forcing it off here would silently skip the suite.
+set(BUILD_TEST OFF CACHE BOOL "" FORCE)
+set(BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_DOC OFF CACHE BOOL "" FORCE)
+set(PQXX_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(libpqxx)
 
 # Strict compiler warnings.
 # Warnings are treated as errors to maintain code quality.
@@ -94,7 +114,7 @@ target_link_libraries(
     srs_options
     srs_deps
     OpenSSL::Crypto
-    PkgConfig::PQXX
+    pqxx
 )
 
 # Main server executable.
