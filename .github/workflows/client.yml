@@ -1,0 +1,55 @@
+name: client
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "client/**"
+      - ".github/workflows/client.yml"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The client needs Qt 6 Widgets and Qt 6 Test. Split into two steps so a
+      # missing Qt Test package is reported as such rather than as a CMake
+      # failure deep inside configure.
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ ninja-build pkg-config \
+            qt6-base-dev libqt6test6 qt6-base-dev-tools
+
+      - name: Configure
+        run: cmake -S client -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build -j
+
+      # The runner has no X server or Wayland compositor. Qt's offscreen plugin
+      # lets QApplication construct widgets and run the dialog tests headlessly;
+      # without it every widget test aborts on "could not connect to display".
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure
+
+      # Building and passing unit tests does not prove the binary starts. Run it
+      # for a few seconds under the offscreen platform: exit 124 from `timeout`
+      # means it was still alive at the deadline, i.e. it did not crash on startup.
+      - name: Smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          timeout 5 ./build/srs_client
+          code=$?
+          if [ "$code" -ne 124 ]; then
+            echo "srs_client exited on its own with code $code"
+            exit 1
+          fi
+          echo "srs_client stayed running for 5s"
