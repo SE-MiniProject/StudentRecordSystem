@@ -3,16 +3,12 @@
 #include <string>
 
 #include "api/error_response.h"
-#include "accounts/account_routes.h"
-#include "accounts/account_store.h"
 #include "auth/login_route.h"
 #include "auth/logout_route.h"
 #include "auth/session_store.h"
 #include "auth/user_store.h"
 #include "httplib.h"
 #include "nlohmann/json.hpp"
-#include "students/student_routes.h"
-#include "students/student_store.h"
 
 namespace srs {
 namespace {
@@ -75,17 +71,10 @@ void RegisterRoutes(httplib::Server& server) {
     // environment per request.
     UserStore& users = DefaultUserStore();
     SessionStore& sessions = DefaultSessionStore();
-    StudentStore& students = DefaultStudentStore();
-    AccountStore& accounts = DefaultAccountStore();
 
     RegisterLoginRoute(server, users);
     RegisterLogoutRoute(server, sessions);
 
-    // The CRUD routes go through RbacGuard rather than an ad-hoc token check:
-    // every one of them must resolve the caller's role from the sessions table,
-    // and expressing that once is what keeps a route from forgetting it.
-    RegisterStudentRoutes(server, students, sessions);
-    RegisterAccountRoutes(server, accounts, sessions);
 
     RegisterErrorHandler(server);
 }
