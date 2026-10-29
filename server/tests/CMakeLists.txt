@@ -21,6 +21,7 @@ add_executable(srs_tests
     test_error_handler.cpp
     test_validation.cpp
     test_seed_data.cpp
+    test_student_routes.cpp
 )
 target_link_libraries(srs_tests PRIVATE srs_core GTest::gtest_main)
 

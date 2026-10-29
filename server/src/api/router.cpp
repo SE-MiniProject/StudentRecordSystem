@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "accounts/account_routes.h"
+#include "accounts/account_store.h"
 #include "api/error_response.h"
 #include "auth/login_route.h"
 #include "auth/logout_route.h"
@@ -79,6 +81,9 @@ void RegisterRoutes(httplib::Server& server) {
 
     StudentStore& students = DefaultStudentStore();
     RegisterStudentRoutes(server, students, sessions);
+
+    AccountStore& accounts = DefaultAccountStore();
+    RegisterAccountRoutes(server, accounts, sessions);
 
 
     RegisterErrorHandler(server);
