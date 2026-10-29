@@ -9,6 +9,8 @@
 #include "auth/user_store.h"
 #include "httplib.h"
 #include "nlohmann/json.hpp"
+#include "students/student_routes.h"
+#include "students/student_store.h"
 
 namespace srs {
 namespace {
@@ -74,6 +76,9 @@ void RegisterRoutes(httplib::Server& server) {
 
     RegisterLoginRoute(server, users);
     RegisterLogoutRoute(server, sessions);
+
+    StudentStore& students = DefaultStudentStore();
+    RegisterStudentRoutes(server, students, sessions);
 
 
     RegisterErrorHandler(server);
