@@ -58,6 +58,24 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f db/migrations/002_students.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_data.sql
 
+      # Applying the whole chain a second time must change no rows. Every table
+      # in db/ is expected to be re-runnable, because that is what happens when
+      # someone applies migrations to a database that already has them. A
+      # seed insert without a matching UNIQUE key would double its rows here
+      # while still exiting 0, so the counts are compared, not just the status.
+      - name: Migrations and seed are idempotent
+        run: |
+          before=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance);")
+          psql -v ON_ERROR_STOP=1 -f db/migrations/001_roles_users.sql
+          psql -v ON_ERROR_STOP=1 -f db/migrations/002_students.sql
+          psql -v ON_ERROR_STOP=1 -f db/seeds/demo_data.sql
+          after=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance);")
+          echo "before=$before after=$after"
+          if [ "$before" != "$after" ]; then
+            echo "Re-applying migrations and seed changed row counts: $before -> $after"
+            exit 1
+          fi
+
       - name: Configure
         run: cmake -S server -B build -DCMAKE_BUILD_TYPE=Release
 
