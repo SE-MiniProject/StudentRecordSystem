@@ -46,8 +46,13 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
+          # `bash -e` is active in Actions steps, so the non-zero exit from
+          # timeout(1) would abort the step before `code=$?` is read. Disable it
+          # for that one command; 124 is the expected success status here.
+          set +e
           timeout 5 ./build/srs_client
           code=$?
+          set -e
           if [ "$code" -ne 124 ]; then
             echo "srs_client exited on its own with code $code"
             exit 1
