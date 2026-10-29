@@ -1,20 +1,22 @@
 #include "auth/user_store.h"
 
+#include <cstdlib>
 #include <optional>
 #include <string>
+
+#include "auth/pg_user_store.h"
 
 namespace srs {
 namespace {
 
-// The store used until the users table is wired up. It finds nothing, so every
-// login returns the generic 401. That is the honest failure for a server with no
+// The store used when DATABASE_URL is unset. It finds nothing, so every login
+// returns the generic 401. That is the honest failure for a server with no
 // database: the endpoint is reachable and shaped correctly, and no credential is
 // ever accepted by accident.
 //
-// Replace the body of these methods with queries against the migration. The
-// interface is chosen so that is the only change needed here: the lockout policy
-// (counter, threshold, expiry) belongs to this class, which is why it takes
-// LockoutState and Session as values rather than exposing them as fields.
+// Tests inject their own store through RegisterLoginRoute, so this path is only
+// reached by a running server, and PgUserStore takes over the moment a URL is
+// configured.
 class UnbackedUserStore final : public UserStore {
 public:
     std::optional<UserRecord> Find(const std::string&) override {
@@ -37,7 +39,18 @@ public:
 }  // namespace
 
 UserStore& DefaultUserStore() {
-    static UnbackedUserStore store;
+    // A function-local static so the store outlives the server and is built once.
+    // DATABASE_URL is read here rather than in the caller because this is the
+    // only place that decides which implementation is in use.
+    static UserStore& store = []() -> UserStore& {
+        const char* url = std::getenv("DATABASE_URL");
+        if (url != nullptr && *url != '\0') {
+            static PgUserStore pg(url);
+            return pg;
+        }
+        static UnbackedUserStore unbacked;
+        return unbacked;
+    }();
     return store;
 }
 
