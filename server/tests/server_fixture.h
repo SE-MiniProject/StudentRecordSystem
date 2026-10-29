@@ -44,6 +44,13 @@ protected:
         if (thread_.joinable()) {
             thread_.join();
         }
+        // Destroy the server here rather than at fixture scope exit. As a plain
+        // member its destructor runs after TearDown returns, which lets the
+        // server's teardown overlap the listener thread's frame unwinding; on
+        // newer glibc that overlap surfaces as "double free detected in tcache 2"
+        // while CMake probes the binary for test discovery. Joining first and
+        // releasing here keeps the two strictly ordered.
+        server_.reset();
     }
 
     virtual void configure(httplib::Server& server) {
