@@ -3,12 +3,16 @@
 #include <string>
 
 #include "api/error_response.h"
+#include "accounts/account_routes.h"
+#include "accounts/account_store.h"
 #include "auth/login_route.h"
 #include "auth/logout_route.h"
 #include "auth/session_store.h"
 #include "auth/user_store.h"
 #include "httplib.h"
 #include "nlohmann/json.hpp"
+#include "students/student_routes.h"
+#include "students/student_store.h"
 
 namespace srs {
 namespace {
@@ -65,20 +69,33 @@ void RegisterErrorHandler(httplib::Server& server) {
 
 void RegisterRoutes(httplib::Server& server) {
     RegisterHealth(server);
-    // The default store rejects every login until the users table is wired up.
-    // Tests call RegisterLoginRoute directly with a fake.
-    RegisterLoginRoute(server, DefaultUserStore());
-    // Likewise rejects every token until the sessions table is wired up.
-    RegisterLogoutRoute(server, DefaultSessionStore());
+
+    // One store instance per kind, shared by every route that needs it. They hold
+    // only a connection string, so sharing is safe and avoids re-reading the
+    // environment per request.
+    UserStore& users = DefaultUserStore();
+    SessionStore& sessions = DefaultSessionStore();
+    StudentStore& students = DefaultStudentStore();
+    AccountStore& accounts = DefaultAccountStore();
+
+    RegisterLoginRoute(server, users);
+    RegisterLogoutRoute(server, sessions);
+
+    // The CRUD routes go through RbacGuard rather than an ad-hoc token check:
+    // every one of them must resolve the caller's role from the sessions table,
+    // and expressing that once is what keeps a route from forgetting it.
+    RegisterStudentRoutes(server, students, sessions);
+    RegisterAccountRoutes(server, accounts, sessions);
+
     RegisterErrorHandler(server);
 }
 
-int RunServer(int port) {
+int RunServer(int port, const std::string& bind) {
     httplib::Server server;
 
     RegisterRoutes(server);
 
-    if (!server.listen("0.0.0.0", port)) {
+    if (!server.listen(bind.c_str(), port)) {
         return 1;
     }
     return 0;
