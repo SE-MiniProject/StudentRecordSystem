@@ -101,6 +101,8 @@ add_library(
     src/validation/validation.cpp
     src/students/pg_student_store.cpp
     src/students/student_routes.cpp
+    src/accounts/pg_account_store.cpp
+    src/accounts/account_routes.cpp
 )
 
 target_include_directories(
