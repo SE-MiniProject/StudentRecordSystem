@@ -232,4 +232,64 @@ bool IsValidAttendanceStatus(const std::string& status) {
     return status == "present" || status == "absent";
 }
 
+FieldErrors ValidateAccountCreate(const std::string& username, const std::string& password,
+                                  const std::string& full_name, const std::string& role) {
+    FieldErrors errors;
+
+    // The same pattern the users table enforces, restated so a bad username is a
+    // 400 with a field error rather than a 500 from a CHECK violation. The
+    // database stays the authority; this is the friendlier earlier copy.
+    bool username_ok = username.size() >= 3 && username.size() <= 64;
+    if (username_ok) {
+        for (const char c : username) {
+            const bool allowed = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' ||
+                                 c == '_' || c == '-';
+            if (!allowed) {
+                username_ok = false;
+                break;
+            }
+        }
+    }
+    if (!username_ok) {
+        errors.Add("username",
+                   "must be 3-64 characters, lowercase letters, digits, '.', '_' or '-'");
+    }
+
+    // Minimum length only. A composition rule (digits, symbols) is a policy the
+    // contract does not state, and inventing one here would reject passwords the
+    // contract considers valid.
+    if (password.size() < 8) {
+        errors.Add("password", "must be at least 8 characters");
+    }
+
+    CheckFullName(full_name, std::string{"required"}, &errors);
+
+    if (role != "admin" && role != "teacher" && role != "student") {
+        errors.Add("role", "must be one of admin, teacher, student");
+    }
+
+    return errors;
+}
+
+FieldErrors ValidateAccountPatch(const AccountPatchFields& fields) {
+    FieldErrors errors;
+
+    // Omitted means unchanged, so only a supplied value is checked; nullopt is
+    // what tells the existing helpers "not supplied".
+    CheckFullName(fields.full_name, std::nullopt, &errors);
+
+    if (!fields.role.empty() && fields.role != "admin" && fields.role != "teacher" &&
+        fields.role != "student") {
+        errors.Add("role", "must be one of admin, teacher, student");
+    }
+
+    // An empty password means "unchanged"; a supplied one gets the same minimum
+    // as create, so the two paths cannot disagree about what is acceptable.
+    if (!fields.password.empty() && fields.password.size() < 8) {
+        errors.Add("password", "must be at least 8 characters");
+    }
+
+    return errors;
+}
+
 }  // namespace srs::validation
