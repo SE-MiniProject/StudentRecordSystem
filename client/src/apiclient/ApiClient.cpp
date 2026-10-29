@@ -1,25 +1,26 @@
 #include "apiclient/ApiClient.h"
 
-#include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QTimer>
 
 namespace {
+// One sentence, one place: the dialog pre-checks the same condition the server
+// answers 400 for, so both paths must say the same thing.
+const char* kMissingCredentials = "Please enter your username and password.";
+// Same text for wrong password, unknown user and locked account (SR-008).
 const char* kGenericLoginError = "Invalid username or password.";
 }
 
 ApiClient::ApiClient(QObject* parent) : QObject(parent), net_(new QNetworkAccessManager(this)) {}
 
-void ApiClient::login(const QString& username, const QString& password) {
-    if (mock_) {
-        mockLogin(username, password);
-        return;
-    }
+QString ApiClient::missingCredentialsMessage() {
+    return QString::fromLatin1(kMissingCredentials);
+}
 
+void ApiClient::login(const QString& username, const QString& password) {
     QNetworkRequest req(QUrl(baseUrl_ + QStringLiteral("/api/auth/login")));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
@@ -37,51 +38,36 @@ void ApiClient::login(const QString& username, const QString& password) {
             return;
         }
         if (status == 200) {
-            token_ = json.value("token").toString();
+            // A 200 that is not a well-formed login response must not open the app.
+            const QString token = json.value("token").toString();
             const QJsonObject user = json.value("user").toObject();
-            emit loginSucceeded(user.value("username").toString(),
-                                user.value("fullName").toString(),
-                                user.value("role").toString());
+            if (token.isEmpty() || user.isEmpty()) {
+                emit loginFailed(QStringLiteral("The server sent an unexpected response."));
+                return;
+            }
+            Session session;
+            session.username = user.value("username").toString();
+            session.fullName = user.value("fullName").toString();
+            session.role = roleFromString(user.value("role").toString());
+            session.token = token;
+            if (!session.isValid()) {
+                emit loginFailed(QStringLiteral("The server sent an unexpected response."));
+                return;
+            }
+            session_ = session;
+            emit loginSucceeded(session_);
             return;
         }
         if (status == 400) {
-            emit loginFailed(QStringLiteral("Please enter your username and password."));
+            emit loginFailed(QString::fromLatin1(kMissingCredentials));
             return;
         }
         if (status == 401) {
-            // Same text for wrong password, unknown user and locked account (SR-008).
             emit loginFailed(QString::fromLatin1(kGenericLoginError));
             return;
         }
         emit loginFailed(QStringLiteral("Something went wrong (code %1). Ref: %2")
                              .arg(status)
                              .arg(json.value("requestId").toString()));
-    });
-}
-
-// Demo mode: pretends to be the server so the UI can be built and tested now.
-// Accounts: admin/admin123, teacher/teacher123, student/student123.
-// Five wrong attempts lock the account, and it still answers with the generic error.
-void ApiClient::mockLogin(const QString& username, const QString& password) {
-    static const QHash<QString, QPair<QString, QPair<QString, QString>>> users = {
-        {"admin", {"admin123", {"Demo Admin", "admin"}}},
-        {"teacher", {"teacher123", {"Demo Teacher", "teacher"}}},
-        {"student", {"student123", {"Demo Student", "student"}}},
-    };
-    static QHash<QString, int> failures;
-
-    QTimer::singleShot(300, this, [=]() {
-        const auto it = users.constFind(username);
-        const bool locked = failures.value(username) >= 5;
-        if (it != users.constEnd() && !locked && it->first == password) {
-            failures.remove(username);
-            token_ = QStringLiteral("mock-token");
-            emit loginSucceeded(username, it->second.first, it->second.second);
-            return;
-        }
-        if (it != users.constEnd()) {
-            failures[username] += 1;
-        }
-        emit loginFailed(QString::fromLatin1(kGenericLoginError));
     });
 }

@@ -13,15 +13,19 @@ LoginDialog::LoginDialog(ApiClient* api, QWidget* parent) : QDialog(parent), api
     setModal(true);
 
     userEdit_ = new QLineEdit;
+    userEdit_->setObjectName(QStringLiteral("userEdit"));
     passEdit_ = new QLineEdit;
+    passEdit_->setObjectName(QStringLiteral("passEdit"));
     passEdit_->setEchoMode(QLineEdit::Password);
 
     errorLabel_ = new QLabel;
+    errorLabel_->setObjectName(QStringLiteral("errorLabel"));
     errorLabel_->setStyleSheet(QStringLiteral("color: #c0392b;"));
     errorLabel_->setWordWrap(true);
     errorLabel_->hide();
 
     loginButton_ = new QPushButton(QStringLiteral("Log in"));
+    loginButton_->setObjectName(QStringLiteral("loginButton"));
     loginButton_->setDefault(true);
 
     auto* form = new QFormLayout;
@@ -36,13 +40,10 @@ LoginDialog::LoginDialog(ApiClient* api, QWidget* parent) : QDialog(parent), api
     connect(loginButton_, &QPushButton::clicked, this, &LoginDialog::onLoginClicked);
     connect(passEdit_, &QLineEdit::returnPressed, this, &LoginDialog::onLoginClicked);
 
-    connect(api_, &ApiClient::loginSucceeded, this,
-            [this](const QString& u, const QString& n, const QString& r) {
-                username_ = u;
-                fullName_ = n;
-                role_ = r;
-                accept();
-            });
+    connect(api_, &ApiClient::loginSucceeded, this, [this](const Session& session) {
+        session_ = session;
+        accept();
+    });
     connect(api_, &ApiClient::loginFailed, this, [this](const QString& message) {
         setBusy(false);
         errorLabel_->setText(message);
@@ -56,7 +57,7 @@ void LoginDialog::onLoginClicked() {
     const QString u = userEdit_->text().trimmed();
     const QString p = passEdit_->text();
     if (u.isEmpty() || p.isEmpty()) {  // the server would reply 400; catch it here first
-        errorLabel_->setText(QStringLiteral("Please enter your username and password."));
+        errorLabel_->setText(ApiClient::missingCredentialsMessage());
         errorLabel_->show();
         return;
     }
