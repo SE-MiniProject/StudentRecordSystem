@@ -99,5 +99,27 @@ bool ConstantTimeEqual(const std::string& a, const std::string& b) {
     return diff == 0;
 }
 
+std::optional<std::string> GenerateToken() {
+    // 32 bytes rather than the salt's 16: a bearer token is a credential, and
+    // 128 bits of guessing resistance is thin for something with an 8 hour life.
+    constexpr int kTokenBytes = 32;
+    unsigned char raw[kTokenBytes];
+    if (RAND_bytes(raw, kTokenBytes) != 1) {
+        return std::nullopt;
+    }
+    return ToHex(raw, kTokenBytes);
+}
+
+std::optional<std::string> HashToken(const std::string& input) {
+    // Plain sha256, nothing prepended: sessions.token_hash is sha256(token), and
+    // issuing and resolving a token must not disagree about that.
+    unsigned char digest[kDigestBytes];
+    unsigned int digest_len = 0;
+    if (EVP_Digest(input.data(), input.size(), digest, &digest_len, EVP_sha256(), nullptr) != 1) {
+        return std::nullopt;
+    }
+    return ToHex(digest, static_cast<int>(digest_len));
+}
+
 }  // namespace password
 }  // namespace srs
