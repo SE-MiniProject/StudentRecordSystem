@@ -30,10 +30,14 @@ int PortFromEnv() {
     }
 }
 
-// Empty means "every interface", which is what container runtimes expect.
+// Defaults to 0.0.0.0 ("every IPv4 interface"), which is what container
+// runtimes expect. It must NOT default to the empty string: cpp-httplib
+// resolves "" to ::1, so the server would listen on IPv6 loopback only and
+// every IPv4 client (curl 127.0.0.1, the test scripts, most browsers) would
+// get connection refused while the process happily logged "listening".
 std::string BindFromEnv() {
     const char* raw = std::getenv("SRS_BIND");
-    return raw && *raw ? raw : "";
+    return raw && *raw ? raw : "0.0.0.0";
 }
 
 }  // namespace
