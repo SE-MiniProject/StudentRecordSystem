@@ -1,7 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 project(srs_server LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+# C++20, not 17: libpqxx 8.x is a C++20 library (it uses std::source_location,
+# std::span, concepts and std::ranges in its public headers). Building against
+# it as C++17 fails inside pqxx's own headers before any project code is read.
+# Ubuntu's libpqxx-dev is 7.x and would tolerate C++17, but pinning to the
+# older standard would make the build depend on the distro rather than on what
+# the code requires.
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -70,6 +76,8 @@ add_library(
     src/auth/rbac.cpp
     src/auth/default_user_store.cpp
     src/auth/default_session_store.cpp
+    src/auth/pg_user_store.cpp
+    src/auth/pg_session_store.cpp
     src/validation/validation.cpp
 )
 
