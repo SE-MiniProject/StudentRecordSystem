@@ -30,6 +30,19 @@ std::optional<std::string> Hash(const std::string& password, const std::string& 
 // many leading characters matched, which is enough to walk a digest out.
 bool ConstantTimeEqual(const std::string& a, const std::string& b);
 
+// A random bearer token: 32 bytes, 64 lowercase hex chars, or nullopt if the
+// CSPRNG failed. Separate from GenerateSalt because a token is not a salt even
+// though both are random hex of the same shape; naming it after its use keeps a
+// caller from thinking a salt can stand in for a credential.
+std::optional<std::string> GenerateToken();
+
+// The plain sha256 of `input`, as 64 lowercase hex chars. This is what the
+// sessions table stores: `token_hash` is sha256(token) with nothing mixed in, so
+// issuing and resolving a token share this one construction. Deliberately not
+// Hash(input, "") — Hash prepends a salt, and a token digest that silently
+// included a zero salt could never be reproduced by a caller reading the schema.
+std::optional<std::string> HashToken(const std::string& input);
+
 }  // namespace password
 
 }  // namespace srs
