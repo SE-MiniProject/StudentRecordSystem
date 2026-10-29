@@ -62,8 +62,8 @@ Student Record System
 ## Repository layout
 
 ```
-client/     Qt Widgets desktop app (CMake, Qt 5.15)
-server/     C++ REST server (CMake)
+client/     Qt Widgets desktop app (CMake, Qt 6, C++17)
+server/     C++ REST server (CMake, C++20)
 db/         PostgreSQL schema — pure SQL
   migrations/  numbered, applied in order
   seeds/       reference_dataset.sql (benchmark set) · demo_data.sql (small demo set)

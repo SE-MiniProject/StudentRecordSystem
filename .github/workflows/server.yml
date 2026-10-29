@@ -6,11 +6,37 @@ on:
   pull_request:
     paths:
       - "server/**"
+      - "db/**"
       - ".github/workflows/server.yml"
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+
+    # A real Postgres, because the login path is only meaningful against one:
+    # the stores are Postgres-backed, and the demo seed must authenticate.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: srs_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: srs_ci
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/srs_ci
 
     steps:
       - uses: actions/checkout@v4
@@ -24,7 +50,34 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libpq-dev
+          sudo apt-get install -y --no-install-recommends libpq-dev postgresql-client
+
+      # Migrations first, then the seed. The seed's digests are verified by
+      # SeedData.* in the unit tests, and the login below proves the whole
+      # chain works against a real database.
+      - name: Apply migrations and seed
+        run: |
+          psql -v ON_ERROR_STOP=1 -f db/migrations/001_roles_users.sql
+          psql -v ON_ERROR_STOP=1 -f db/migrations/002_students.sql
+          psql -v ON_ERROR_STOP=1 -f db/seeds/demo_data.sql
+
+      # Applying the whole chain a second time must change no rows. Every table
+      # in db/ is expected to be re-runnable, because that is what happens when
+      # someone applies migrations to a database that already has them. A
+      # seed insert without a matching UNIQUE key would double its rows here
+      # while still exiting 0, so the counts are compared, not just the status.
+      - name: Migrations and seed are idempotent
+        run: |
+          before=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance);")
+          psql -v ON_ERROR_STOP=1 -f db/migrations/001_roles_users.sql
+          psql -v ON_ERROR_STOP=1 -f db/migrations/002_students.sql
+          psql -v ON_ERROR_STOP=1 -f db/seeds/demo_data.sql
+          after=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance);")
+          echo "before=$before after=$after"
+          if [ "$before" != "$after" ]; then
+            echo "Re-applying migrations and seed changed row counts: $before -> $after"
+            exit 1
+          fi
 
       - name: Configure
         run: cmake -S server -B build -DCMAKE_BUILD_TYPE=Release
@@ -44,3 +97,166 @@ jobs:
           done
           echo "server did not answer /health"
           exit 1
+
+      # End-to-end against a real database. The unit tests use fake stores, so
+      # they cannot catch a bad seed digest, a migration that does not apply, or
+      # a SQL placeholder count that only breaks at runtime. Every assertion
+      # below failed at least once locally before the code was fixed.
+      - name: End-to-end API against seeded database
+        run: |
+          PORT=8089 ./build/srs_server &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 50); do
+            curl -fsS http://127.0.0.1:8089/health >/dev/null && break
+            sleep 0.2
+          done
+
+          base=http://127.0.0.1:8089
+
+          login() {
+            curl -fsS -X POST "$base/api/auth/login" \
+              -H 'Content-Type: application/json' \
+              -d "{\"username\":\"$1\",\"password\":\"$2\"}" \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])'
+          }
+
+          status_of() {
+            curl -s -o /dev/null -w '%{http_code}' "$@"
+          }
+
+          # --- login shape (SRS-14) ---
+          response=$(curl -fsS -X POST "$base/api/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"admin","password":"admin"}')
+          echo "login response: $response"
+          printf '%s' "$response" | python3 -c '
+          import json, sys
+          body = json.load(sys.stdin)
+          assert body["user"]["username"] == "admin", body
+          assert body["user"]["role"] == "admin", body
+          assert body["user"]["fullName"] == "System Administrator", body
+          assert body["expiresAt"], body
+          '
+
+          admin=$(login admin admin)
+          teacher=$(login teacher teacher)
+          student=$(login student student)
+          [ -n "$admin" ] && [ -n "$teacher" ] && [ -n "$student" ] \
+            || { echo "one of the three seeded accounts did not log in"; exit 1; }
+
+          # --- SRS-16 view and search, role-scoped ---
+          list=$(curl -fsS "$base/api/students?limit=1" -H "Authorization: Bearer $admin")
+          echo "list: $list"
+          printf '%s' "$list" | python3 -c '
+          import json, sys
+          body = json.load(sys.stdin)
+          assert body["limit"] == 1, body
+          assert len(body["items"]) == 1, body
+          assert body["total"] >= 2, body
+          assert set(body["items"][0]) == {
+              "rollNo", "fullName", "dateOfBirth", "department", "semester", "contact"}, body
+          '
+
+          found=$(curl -fsS "$base/api/students?search=Asha" -H "Authorization: Bearer $admin")
+          printf '%s' "$found" | python3 -c '
+          import json, sys
+          body = json.load(sys.stdin)
+          assert body["total"] == 1, body
+          assert body["items"][0]["rollNo"] == "1ABC26CS002", body
+          '
+
+          # limit above the documented maximum is a client error, not a clamp.
+          over=$(status_of "$base/api/students?limit=9999" -H "Authorization: Bearer $admin")
+          echo "limit=9999: $over"
+          [ "$over" = "400" ] || { echo "expected 400 for limit>200, got $over"; exit 1; }
+
+          # A student may read their own record but not another's.
+          own=$(status_of "$base/api/students/1ABC26CS001" -H "Authorization: Bearer $student")
+          other=$(status_of "$base/api/students/1ABC26CS002" -H "Authorization: Bearer $student")
+          echo "student self=$own other=$other"
+          [ "$own" = "200" ] || { echo "student should read own record, got $own"; exit 1; }
+          [ "$other" = "403" ] || { echo "student must not read another record, got $other"; exit 1; }
+
+          # --- SRS-20 create, SRS-25 update, SRS-26 delete ---
+          created=$(status_of -X POST "$base/api/students" \
+            -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
+            -d '{"rollNo":"1ABC26CS999","fullName":"CI Test","dateOfBirth":"2003-05-05","department":"Computer Science","semester":5,"contact":"ci@example.edu"}')
+          echo "create: $created"
+          [ "$created" = "201" ] || { echo "expected 201 from create, got $created"; exit 1; }
+
+          duplicate=$(status_of -X POST "$base/api/students" \
+            -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
+            -d '{"rollNo":"1ABC26CS999","fullName":"CI Test","dateOfBirth":"2003-05-05","department":"Computer Science","semester":5,"contact":"ci@example.edu"}')
+          echo "duplicate: $duplicate"
+          [ "$duplicate" = "409" ] || { echo "expected 409 from duplicate rollNo, got $duplicate"; exit 1; }
+
+          teacher_create=$(status_of -X POST "$base/api/students" \
+            -H "Authorization: Bearer $teacher" -H 'Content-Type: application/json' \
+            -d '{"rollNo":"1ABC26CS998","fullName":"Nope","dateOfBirth":"2003-05-05","department":"Computer Science","semester":5,"contact":"n@example.edu"}')
+          echo "teacher create: $teacher_create"
+          [ "$teacher_create" = "403" ] || { echo "expected 403 for teacher create, got $teacher_create"; exit 1; }
+
+          invalid=$(curl -s -X POST "$base/api/students" \
+            -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
+            -d '{"rollNo":"","fullName":"","semester":99}')
+          echo "invalid create: $invalid"
+          printf '%s' "$invalid" | python3 -c '
+          import json, sys
+          body = json.load(sys.stdin)
+          assert body["error"]["code"] == "validation_failed", body
+          assert body["error"]["fields"], body
+          '
+
+          updated=$(status_of -X PUT "$base/api/students/1ABC26CS999" \
+            -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
+            -d '{"semester":6}')
+          echo "update: $updated"
+          [ "$updated" = "200" ] || { echo "expected 200 from update, got $updated"; exit 1; }
+
+          deleted=$(status_of -X DELETE "$base/api/students/1ABC26CS999" \
+            -H "Authorization: Bearer $admin")
+          echo "delete: $deleted"
+          [ "$deleted" = "204" ] || { echo "expected 204 from delete, got $deleted"; exit 1; }
+
+          # --- SRS-19 create account, SRS-17 patch account ---
+          account=$(status_of -X POST "$base/api/accounts" \
+            -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
+            -d '{"username":"ciuser","password":"ci-password","fullName":"CI User","role":"teacher"}')
+          echo "create account: $account"
+          [ "$account" = "201" ] || { echo "expected 201 from create account, got $account"; exit 1; }
+
+          # The new account works, proving the password was stored hashed.
+          ci_token=$(login ciuser ci-password)
+          [ -n "$ci_token" ] || { echo "newly created account cannot log in"; exit 1; }
+
+          # Deactivating it must revoke access, not just flip a column.
+          patched=$(status_of -X PATCH "$base/api/accounts/ciuser" \
+            -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
+            -d '{"active":false}')
+          echo "patch account: $patched"
+          [ "$patched" = "200" ] || { echo "expected 200 from patch, got $patched"; exit 1; }
+
+          revoked=$(status_of "$base/api/students" -H "Authorization: Bearer $ci_token")
+          echo "deactivated token: $revoked"
+          [ "$revoked" = "401" ] || { echo "deactivated account still authorised, got $revoked"; exit 1; }
+
+          # --- forged credentials (SRS-15) ---
+          forged=$(status_of "$base/api/students" -H "Authorization: Bearer not-a-real-token")
+          echo "forged token: $forged"
+          [ "$forged" = "401" ] || { echo "expected 401 for a forged token, got $forged"; exit 1; }
+
+          wrong=$(status_of -X POST "$base/api/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"admin","password":"not-the-password"}')
+          echo "wrong-password status: $wrong"
+          [ "$wrong" = "401" ] || { echo "expected 401 for a wrong password, got $wrong"; exit 1; }
+
+          # --- SRS-18 logout ---
+          logout=$(status_of -X POST "$base/api/auth/logout" -H "Authorization: Bearer $admin")
+          echo "logout: $logout"
+          [ "$logout" = "204" ] || { echo "expected 204 from logout, got $logout"; exit 1; }
+
+          after=$(status_of "$base/api/students" -H "Authorization: Bearer $admin")
+          echo "token after logout: $after"
+          [ "$after" = "401" ] || { echo "logged-out token still works, got $after"; exit 1; }
