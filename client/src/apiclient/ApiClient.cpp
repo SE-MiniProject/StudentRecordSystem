@@ -7,6 +7,8 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QTimer>
+#include <QJsonArray>
+#include <QUrlQuery>
 
 namespace {
 const char* kGenericLoginError = "Invalid username or password.";
@@ -83,5 +85,99 @@ void ApiClient::mockLogin(const QString& username, const QString& password) {
             failures[username] += 1;
         }
         emit loginFailed(QString::fromLatin1(kGenericLoginError));
+    });
+}
+
+void ApiClient::searchStudents(const QString& search, int semester, int limit, int offset) {
+    if (mock_) {
+        mockSearchStudents(search, semester, limit, offset);
+        return;
+    }
+
+    QUrl url(baseUrl_ + QStringLiteral("/api/students"));
+    QUrlQuery query;
+    if (!search.trimmed().isEmpty()) {
+        query.addQueryItem(QStringLiteral("search"), search.trimmed());
+    }
+    if (semester > 0) {
+        query.addQueryItem(QStringLiteral("semester"), QString::number(semester));
+    }
+    query.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    query.addQueryItem(QStringLiteral("offset"), QString::number(offset));
+    url.setQuery(query);
+
+    QNetworkRequest req(url);
+    req.setRawHeader("Authorization", QByteArray("Bearer ") + token_.toUtf8());
+    QNetworkReply* reply = net_->get(req);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+
+        if (status == 0) {
+            emit studentsFailed(QStringLiteral("Cannot reach the server. Is it running?"));
+            return;
+        }
+        if (status == 200) {
+            QJsonArray items;
+            int total = 0;
+            if (doc.isArray()) {  // old server shape: bare array
+                items = doc.array();
+                total = items.size();
+            } else {              // contract shape: {items,total,limit,offset}
+                const QJsonObject obj = doc.object();
+                items = obj.value(QStringLiteral("items")).toArray();
+                total = obj.value(QStringLiteral("total")).toInt(items.size());
+            }
+            emit studentsLoaded(items, total);
+            return;
+        }
+        if (status == 401) {
+            emit studentsFailed(QStringLiteral("Your session has expired. Please log in again."));
+            return;
+        }
+        if (status == 403) {
+            emit studentsFailed(QStringLiteral("You do not have permission to view students."));
+            return;
+        }
+        emit studentsFailed(QStringLiteral("Something went wrong (code %1). Ref: %2")
+                                .arg(status)
+                                .arg(doc.object().value(QStringLiteral("requestId")).toString()));
+    });
+}
+
+// Demo mode: 12 fake students so search and paging can be tested without the server.
+void ApiClient::mockSearchStudents(const QString& search, int semester, int limit, int offset) {
+    QTimer::singleShot(300, this, [=]() {
+        static const char* names[] = {"Aarav Sharma", "Advitha Shetty ", "Ananya Rao",
+                                      "Bhavya Nair",  "Chirag Patel",   "Divya Kulkarni",
+                                      "Eshan Gupta",  "Farhan Khan",    "Gayathri Iyer",
+                                      "Harsh Verma",  "Ishita Menon",   "Jayant Reddy"};
+        const QString q = search.trimmed();
+        QJsonArray matches;
+        for (int i = 0; i < 12; ++i) {
+            const QString roll = QStringLiteral("PES2UG23CS%1").arg(101 + i);
+            const QString name = QString::fromLatin1(names[i]);
+            const int sem = 1 + (i % 8);
+            if (!q.isEmpty() && !name.contains(q, Qt::CaseInsensitive) &&
+                !roll.contains(q, Qt::CaseInsensitive)) {
+                continue;
+            }
+            if (semester > 0 && sem != semester) {
+                continue;
+            }
+            matches.append(QJsonObject{{"rollNo", roll},
+                                       {"fullName", name},
+                                       {"department", "CSE-AIML"},
+                                       {"semester", sem},
+                                       {"contact", QString("student%1@example.edu").arg(i + 1)},
+                                       {"dateOfBirth", "2005-04-11"}});
+        }
+        QJsonArray page;
+        for (int i = offset; i < matches.size() && i < offset + limit; ++i) {
+            page.append(matches.at(i));
+        }
+        emit studentsLoaded(page, matches.size());
     });
 }

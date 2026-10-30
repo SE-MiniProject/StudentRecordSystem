@@ -1,9 +1,11 @@
 #pragma once
 #include <QMainWindow>
 
+class ApiClient;
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    MainWindow(const QString& username, const QString& fullName, const QString& role,
-               QWidget* parent = nullptr);
+    MainWindow(ApiClient* api, const QString& username, const QString& fullName,
+               const QString& role, QWidget* parent = nullptr);
 };

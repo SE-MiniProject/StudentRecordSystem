@@ -3,10 +3,14 @@
 #include <QLabel>
 #include <QMenuBar>
 #include <QStatusBar>
+#include <QAction>
+#include <QMenu>
+
+#include "students/StudentsWidget.h"
 
 // Menus are enabled per role. This is cosmetic only: the server enforces access (SR-004).
-MainWindow::MainWindow(const QString& username, const QString& fullName, const QString& role,
-                       QWidget* parent)
+MainWindow::MainWindow(ApiClient* api, const QString& username, const QString& fullName,
+                       const QString& role, QWidget* parent)
     : QMainWindow(parent) {
     setWindowTitle(QStringLiteral("Student Record System"));
     resize(900, 600);
@@ -15,7 +19,10 @@ MainWindow::MainWindow(const QString& username, const QString& fullName, const Q
     const bool isTeacher = role == QLatin1String("teacher");
 
     QMenu* students = menuBar()->addMenu(QStringLiteral("&Students"));
-    students->addAction(QStringLiteral("View / Search"))->setEnabled(isAdmin || isTeacher);
+    QAction* viewStudents = students->addAction(QStringLiteral("View / Search"));
+    viewStudents->setEnabled(isAdmin || isTeacher);
+    connect(viewStudents, &QAction::triggered, this,
+            [this, api]() { setCentralWidget(new StudentsWidget(api, this)); });
     students->addAction(QStringLiteral("Add / Edit / Delete"))->setEnabled(isAdmin);
 
     QMenu* academics = menuBar()->addMenu(QStringLiteral("&Academics"));
