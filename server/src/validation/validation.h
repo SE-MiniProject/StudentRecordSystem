@@ -73,6 +73,29 @@ FieldErrors ValidateStudentCreate(const StudentFields& fields);
 // partial-update semantics.
 FieldErrors ValidateStudentUpdate(const StudentFields& fields);
 
+// Rules for POST /api/accounts (SRS-19). `username` is checked against the same
+// pattern the users table enforces, so a body the server accepts is a row the
+// database will not reject; the other fields mirror the users table's checks.
+//
+// The password rule lives here rather than in the route for the same reason as
+// the student rules: a request that bypasses the Qt form (curl, a script) must
+// face the identical policy, and this is the copy that decides.
+FieldErrors ValidateAccountCreate(const std::string& username, const std::string& password,
+                                  const std::string& full_name, const std::string& role);
+
+// Rules for PATCH /api/accounts/{username}: every field is optional, and an
+// empty value means "unchanged". A role, when supplied, must be one of the
+// three the contract recognises.
+struct AccountPatchFields {
+    std::string full_name;
+    std::string role;
+    std::string password;
+    bool has_active = false;
+    bool active = true;
+};
+
+FieldErrors ValidateAccountPatch(const AccountPatchFields& fields);
+
 // Rules for a grade. 0.0-10.0 inclusive is the contract's range (F-012).
 bool IsValidGrade(double grade);
 

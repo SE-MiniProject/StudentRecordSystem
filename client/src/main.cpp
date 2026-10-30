@@ -23,10 +23,10 @@ int main(int argc, char* argv[]) {
 
     LoginDialog login(&api);
     if (login.exec() != QDialog::Accepted) {
-        return 0;
+        return 0;  // the user closed the dialog without signing in
     }
 
-    MainWindow window(&api, login.username(), login.fullName(), login.role());
+    MainWindow window(login.session(), &api);
     window.show();
     return app.exec();
 }

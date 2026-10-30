@@ -1,20 +1,29 @@
 #include "apiclient/ApiClient.h"
 
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QTimer>
-#include <QJsonArray>
+#include <QUrl>
 #include <QUrlQuery>
 
 namespace {
+// One sentence, one place: the dialog pre-checks the same condition the server
+// answers 400 for, so both paths must say the same thing.
+const char* kMissingCredentials = "Please enter your username and password.";
+// Same text for wrong password, unknown user and locked account (SR-008).
 const char* kGenericLoginError = "Invalid username or password.";
 }
 
 ApiClient::ApiClient(QObject* parent) : QObject(parent), net_(new QNetworkAccessManager(this)) {}
+
+QString ApiClient::missingCredentialsMessage() {
+    return QString::fromLatin1(kMissingCredentials);
+}
 
 void ApiClient::login(const QString& username, const QString& password) {
     if (mock_) {
@@ -39,19 +48,31 @@ void ApiClient::login(const QString& username, const QString& password) {
             return;
         }
         if (status == 200) {
-            token_ = json.value("token").toString();
+            // A 200 that is not a well-formed login response must not open the app.
+            const QString token = json.value("token").toString();
             const QJsonObject user = json.value("user").toObject();
-            emit loginSucceeded(user.value("username").toString(),
-                                user.value("fullName").toString(),
-                                user.value("role").toString());
+            if (token.isEmpty() || user.isEmpty()) {
+                emit loginFailed(QStringLiteral("The server sent an unexpected response."));
+                return;
+            }
+            Session session;
+            session.username = user.value("username").toString();
+            session.fullName = user.value("fullName").toString();
+            session.role = roleFromString(user.value("role").toString());
+            session.token = token;
+            if (!session.isValid()) {
+                emit loginFailed(QStringLiteral("The server sent an unexpected response."));
+                return;
+            }
+            session_ = session;
+            emit loginSucceeded(session_);
             return;
         }
         if (status == 400) {
-            emit loginFailed(QStringLiteral("Please enter your username and password."));
+            emit loginFailed(QString::fromLatin1(kMissingCredentials));
             return;
         }
         if (status == 401) {
-            // Same text for wrong password, unknown user and locked account (SR-008).
             emit loginFailed(QString::fromLatin1(kGenericLoginError));
             return;
         }
@@ -65,20 +86,31 @@ void ApiClient::login(const QString& username, const QString& password) {
 // Accounts: admin/admin123, teacher/teacher123, student/student123.
 // Five wrong attempts lock the account, and it still answers with the generic error.
 void ApiClient::mockLogin(const QString& username, const QString& password) {
-    static const QHash<QString, QPair<QString, QPair<QString, QString>>> users = {
-        {"admin", {"admin123", {"Demo Admin", "admin"}}},
-        {"teacher", {"teacher123", {"Demo Teacher", "teacher"}}},
-        {"student", {"student123", {"Demo Student", "student"}}},
+    struct MockUser {
+        const char* password;
+        const char* fullName;
+        const char* role;
+    };
+    static const QHash<QString, MockUser> users = {
+        {QStringLiteral("admin"), {"admin123", "Demo Admin", "admin"}},
+        {QStringLiteral("teacher"), {"teacher123", "Demo Teacher", "teacher"}},
+        {QStringLiteral("student"), {"student123", "Demo Student", "student"}},
     };
     static QHash<QString, int> failures;
 
-    QTimer::singleShot(300, this, [=]() {
+    QTimer::singleShot(300, this, [this, username, password]() {
         const auto it = users.constFind(username);
         const bool locked = failures.value(username) >= 5;
-        if (it != users.constEnd() && !locked && it->first == password) {
+        if (it != users.constEnd() && !locked &&
+            QString::fromLatin1(it->password) == password) {
             failures.remove(username);
-            token_ = QStringLiteral("mock-token");
-            emit loginSucceeded(username, it->second.first, it->second.second);
+            Session session;
+            session.username = username;
+            session.fullName = QString::fromLatin1(it->fullName);
+            session.role = roleFromString(QString::fromLatin1(it->role));
+            session.token = QStringLiteral("mock-token");
+            session_ = session;
+            emit loginSucceeded(session_);
             return;
         }
         if (it != users.constEnd()) {
@@ -107,7 +139,7 @@ void ApiClient::searchStudents(const QString& search, int semester, int limit, i
     url.setQuery(query);
 
     QNetworkRequest req(url);
-    req.setRawHeader("Authorization", QByteArray("Bearer ") + token_.toUtf8());
+    req.setRawHeader("Authorization", QByteArray("Bearer ") + session_.token.toUtf8());
     QNetworkReply* reply = net_->get(req);
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -124,11 +156,11 @@ void ApiClient::searchStudents(const QString& search, int semester, int limit, i
             int total = 0;
             if (doc.isArray()) {  // old server shape: bare array
                 items = doc.array();
-                total = items.size();
+                total = static_cast<int>(items.size());
             } else {              // contract shape: {items,total,limit,offset}
                 const QJsonObject obj = doc.object();
                 items = obj.value(QStringLiteral("items")).toArray();
-                total = obj.value(QStringLiteral("total")).toInt(items.size());
+                total = obj.value(QStringLiteral("total")).toInt(static_cast<int>(items.size()));
             }
             emit studentsLoaded(items, total);
             return;
@@ -149,8 +181,8 @@ void ApiClient::searchStudents(const QString& search, int semester, int limit, i
 
 // Demo mode: 12 fake students so search and paging can be tested without the server.
 void ApiClient::mockSearchStudents(const QString& search, int semester, int limit, int offset) {
-    QTimer::singleShot(300, this, [=]() {
-        static const char* names[] = {"Aarav Sharma", "Advitha Shetty ", "Ananya Rao",
+    QTimer::singleShot(300, this, [this, search, semester, limit, offset]() {
+        static const char* names[] = {"Aarav Sharma", "Advitha Shetty", "Ananya Rao",
                                       "Bhavya Nair",  "Chirag Patel",   "Divya Kulkarni",
                                       "Eshan Gupta",  "Farhan Khan",    "Gayathri Iyer",
                                       "Harsh Verma",  "Ishita Menon",   "Jayant Reddy"};
@@ -178,6 +210,6 @@ void ApiClient::mockSearchStudents(const QString& search, int semester, int limi
         for (int i = offset; i < matches.size() && i < offset + limit; ++i) {
             page.append(matches.at(i));
         }
-        emit studentsLoaded(page, matches.size());
+        emit studentsLoaded(page, static_cast<int>(matches.size()));
     });
 }

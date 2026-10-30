@@ -20,8 +20,19 @@ add_executable(srs_tests
     test_rbac.cpp
     test_error_handler.cpp
     test_validation.cpp
+    test_seed_data.cpp
+    test_student_routes.cpp
 )
 target_link_libraries(srs_tests PRIVATE srs_core GTest::gtest_main)
+
+# The seed fixture lives in the repository, not beside the test binary, and it
+# must be read by a test that runs with the build tree as its working directory.
+# Baking the absolute path in keeps that test independent of CWD depth.
+target_compile_definitions(
+    srs_tests
+    PRIVATE SRS_SEED_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../../db/seeds/demo_data.sql"
+)
+
 
 include(GoogleTest)
 gtest_discover_tests(srs_tests)
