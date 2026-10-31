@@ -7,6 +7,9 @@ on:
     paths:
       - "server/**"
       - "db/**"
+      # The server serves web/ (RegisterStaticRoutes), so a renamed or deleted
+      # asset path is a server-visible failure. Run this job on web changes too.
+      - "web/**"
       - ".github/workflows/server.yml"
 
 jobs:

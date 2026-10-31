@@ -13,6 +13,7 @@
 #include "nlohmann/json.hpp"
 #include "students/student_routes.h"
 #include "students/student_store.h"
+#include "web/static_files.h"
 
 namespace srs {
 namespace {
@@ -85,6 +86,10 @@ void RegisterRoutes(httplib::Server& server) {
     AccountStore& accounts = DefaultAccountStore();
     RegisterAccountRoutes(server, accounts, sessions);
 
+    // Registered last, on purpose. The web client's catch-all path route would
+    // otherwise claim /api/... and answer a JSON 404 with an HTML 404. Every
+    // API route above is matched first.
+    RegisterStaticRoutes(server, WebRootFromEnv());
 
     RegisterErrorHandler(server);
 }

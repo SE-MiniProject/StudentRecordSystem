@@ -4,5 +4,9 @@ docs/diagram
 
 # Local build trees
 build/
-client/build/
 server/build/
+build-client/
+build-server/
+
+# Playwright/Chromium smoke-test scratch profile
+web/.smoke-profile/
