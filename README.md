@@ -62,7 +62,7 @@ Student Record System
 ## Repository layout
 
 ```
-client/     Qt Widgets desktop app (CMake, Qt 6, C++17)
+web/        HTML/JS client (no build step, ES modules)
 server/     C++ REST server (CMake, C++20)
 db/         PostgreSQL schema — pure SQL
   migrations/  numbered, applied in order
@@ -71,7 +71,7 @@ db/         PostgreSQL schema — pure SQL
 docs/       SRS, SAD, test plan, sprint plan, diagrams, templates
 ```
 
-Inside `client/` and `server/`, the module folders (`login/`, `auth/`, `students/`, …) are created together with their first real source file — nothing empty is committed beyond the top-level lanes.
+Inside `web/` and `server/`, the module folders (`pages/`, `api/`, `auth/`, …) are created together with their first real source file — nothing empty is committed beyond the top-level lanes. `web/` has no build step: `npm test` runs the unit tests with Node's built-in runner, and `npm run test:smoke` drives the real pages in headless Chromium.
 
 ## Project Management
 

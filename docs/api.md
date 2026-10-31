@@ -1,8 +1,8 @@
 # API Contract
 
-Wire contract between the Qt client and the C++ server. Endpoints and roles from SAD §4.4, status codes from §4.5, fields from SRS §4.3–4.7.
+Wire contract between the web client and the C++ server. Endpoints and roles from SAD §4.4, status codes from §4.5, fields from SRS §4.3–4.7.
 
-Changing this file requires a PR reviewed by both the client and server owners.
+The contract is unchanged by the move from the Qt desktop client to the browser client: the server is untouched, so this file needs no endpoint, status-code, or field change. Changing it still requires a PR reviewed by both the client and server owners.
 
 ## Conventions
 

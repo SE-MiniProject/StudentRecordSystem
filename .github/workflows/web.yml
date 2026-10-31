@@ -1,0 +1,51 @@
+name: web
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/web.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 21+ for the global WebSocket the smoke test uses to speak the
+      # DevTools protocol. On Node 20 that identifier is undefined and the test
+      # dies immediately, which is what pinned this to 22 (current LTS).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # The client has no build step and no dependencies, so there is nothing to
+      # install. That is the point of the no-framework choice: `node --test` is
+      # the whole unit-test setup.
+      - name: Unit tests
+        working-directory: web
+        run: npm test
+
+      # The runner image has no usable browser: its `chromium` is a snap shim
+      # that cannot run inside the container, and spawning it fails rather than
+      # starting a browser. Install the real Chrome .deb and point the smoke
+      # test at it. `google-chrome` is in smoke.mjs's candidate list, so no
+      # CHROME= override is needed, but the env var documents the dependency.
+      - name: Install Chrome
+        run: |
+          wget -q -O /tmp/chrome.deb \
+            https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y /tmp/chrome.deb
+
+      # The unit tests exercise api.js against a stubbed fetch. This step is the
+      # one that proves the actual pages render and the flows work, which is
+      # what the Qt widget tests used to cover. smoke.mjs starts its own static
+      # server and its own headless Chrome, so it needs no services here.
+      - name: Browser smoke test
+        working-directory: web
+        run: npm run test:smoke
+        env:
+          CHROME: google-chrome

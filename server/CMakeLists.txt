@@ -103,6 +103,7 @@ add_library(
     src/students/student_routes.cpp
     src/accounts/pg_account_store.cpp
     src/accounts/account_routes.cpp
+    src/web/static_files.cpp
 )
 
 target_include_directories(

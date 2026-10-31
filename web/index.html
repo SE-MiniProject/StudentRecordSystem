@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- The client holds a bearer token, so it must never be framed or leak a
+         referrer to a third party. Mirrors SR-005/SR-007's intent. -->
+    <meta name="referrer" content="no-referrer" />
+    <title>Student Record System</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body>
+    <!-- Everything after this point is built by main.js. The empty #app is
+         deliberate: no screen exists until a session does, which is what stops
+         a reload from briefly rendering the shell unauthenticated. -->
+    <div id="app" class="app"></div>
+
+    <!-- Live region for screen readers. Visually hidden; pages write status
+         text into their own area, this one announces transient failures. -->
+    <div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
+
+    <noscript>
+      <p class="noscript">
+        This application requires JavaScript. Please enable it and reload.
+      </p>
+    </noscript>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>

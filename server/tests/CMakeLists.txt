@@ -22,6 +22,7 @@ add_executable(srs_tests
     test_validation.cpp
     test_seed_data.cpp
     test_student_routes.cpp
+    test_static_files.cpp
 )
 target_link_libraries(srs_tests PRIVATE srs_core GTest::gtest_main)
 
