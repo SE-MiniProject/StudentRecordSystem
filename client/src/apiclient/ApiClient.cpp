@@ -1,10 +1,15 @@
 #include "apiclient/ApiClient.h"
 
+#include <QHash>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QTimer>
+#include <QUrl>
+#include <QUrlQuery>
 
 namespace {
 // One sentence, one place: the dialog pre-checks the same condition the server
@@ -21,6 +26,11 @@ QString ApiClient::missingCredentialsMessage() {
 }
 
 void ApiClient::login(const QString& username, const QString& password) {
+    if (mock_) {
+        mockLogin(username, password);
+        return;
+    }
+
     QNetworkRequest req(QUrl(baseUrl_ + QStringLiteral("/api/auth/login")));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
@@ -69,5 +79,137 @@ void ApiClient::login(const QString& username, const QString& password) {
         emit loginFailed(QStringLiteral("Something went wrong (code %1). Ref: %2")
                              .arg(status)
                              .arg(json.value("requestId").toString()));
+    });
+}
+
+// Demo mode: pretends to be the server so the UI can be built and tested now.
+// Accounts: admin/admin123, teacher/teacher123, student/student123.
+// Five wrong attempts lock the account, and it still answers with the generic error.
+void ApiClient::mockLogin(const QString& username, const QString& password) {
+    struct MockUser {
+        const char* password;
+        const char* fullName;
+        const char* role;
+    };
+    static const QHash<QString, MockUser> users = {
+        {QStringLiteral("admin"), {"admin123", "Demo Admin", "admin"}},
+        {QStringLiteral("teacher"), {"teacher123", "Demo Teacher", "teacher"}},
+        {QStringLiteral("student"), {"student123", "Demo Student", "student"}},
+    };
+    static QHash<QString, int> failures;
+
+    QTimer::singleShot(300, this, [this, username, password]() {
+        const auto it = users.constFind(username);
+        const bool locked = failures.value(username) >= 5;
+        if (it != users.constEnd() && !locked &&
+            QString::fromLatin1(it->password) == password) {
+            failures.remove(username);
+            Session session;
+            session.username = username;
+            session.fullName = QString::fromLatin1(it->fullName);
+            session.role = roleFromString(QString::fromLatin1(it->role));
+            session.token = QStringLiteral("mock-token");
+            session_ = session;
+            emit loginSucceeded(session_);
+            return;
+        }
+        if (it != users.constEnd()) {
+            failures[username] += 1;
+        }
+        emit loginFailed(QString::fromLatin1(kGenericLoginError));
+    });
+}
+
+void ApiClient::searchStudents(const QString& search, int semester, int limit, int offset) {
+    if (mock_) {
+        mockSearchStudents(search, semester, limit, offset);
+        return;
+    }
+
+    QUrl url(baseUrl_ + QStringLiteral("/api/students"));
+    QUrlQuery query;
+    if (!search.trimmed().isEmpty()) {
+        query.addQueryItem(QStringLiteral("search"), search.trimmed());
+    }
+    if (semester > 0) {
+        query.addQueryItem(QStringLiteral("semester"), QString::number(semester));
+    }
+    query.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    query.addQueryItem(QStringLiteral("offset"), QString::number(offset));
+    url.setQuery(query);
+
+    QNetworkRequest req(url);
+    req.setRawHeader("Authorization", QByteArray("Bearer ") + session_.token.toUtf8());
+    QNetworkReply* reply = net_->get(req);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+
+        if (status == 0) {
+            emit studentsFailed(QStringLiteral("Cannot reach the server. Is it running?"));
+            return;
+        }
+        if (status == 200) {
+            QJsonArray items;
+            int total = 0;
+            if (doc.isArray()) {  // old server shape: bare array
+                items = doc.array();
+                total = static_cast<int>(items.size());
+            } else {              // contract shape: {items,total,limit,offset}
+                const QJsonObject obj = doc.object();
+                items = obj.value(QStringLiteral("items")).toArray();
+                total = obj.value(QStringLiteral("total")).toInt(static_cast<int>(items.size()));
+            }
+            emit studentsLoaded(items, total);
+            return;
+        }
+        if (status == 401) {
+            emit studentsFailed(QStringLiteral("Your session has expired. Please log in again."));
+            return;
+        }
+        if (status == 403) {
+            emit studentsFailed(QStringLiteral("You do not have permission to view students."));
+            return;
+        }
+        emit studentsFailed(QStringLiteral("Something went wrong (code %1). Ref: %2")
+                                .arg(status)
+                                .arg(doc.object().value(QStringLiteral("requestId")).toString()));
+    });
+}
+
+// Demo mode: 12 fake students so search and paging can be tested without the server.
+void ApiClient::mockSearchStudents(const QString& search, int semester, int limit, int offset) {
+    QTimer::singleShot(300, this, [this, search, semester, limit, offset]() {
+        static const char* names[] = {"Aarav Sharma", "Advitha Shetty", "Ananya Rao",
+                                      "Bhavya Nair",  "Chirag Patel",   "Divya Kulkarni",
+                                      "Eshan Gupta",  "Farhan Khan",    "Gayathri Iyer",
+                                      "Harsh Verma",  "Ishita Menon",   "Jayant Reddy"};
+        const QString q = search.trimmed();
+        QJsonArray matches;
+        for (int i = 0; i < 12; ++i) {
+            const QString roll = QStringLiteral("PES2UG23CS%1").arg(101 + i);
+            const QString name = QString::fromLatin1(names[i]);
+            const int sem = 1 + (i % 8);
+            if (!q.isEmpty() && !name.contains(q, Qt::CaseInsensitive) &&
+                !roll.contains(q, Qt::CaseInsensitive)) {
+                continue;
+            }
+            if (semester > 0 && sem != semester) {
+                continue;
+            }
+            matches.append(QJsonObject{{"rollNo", roll},
+                                       {"fullName", name},
+                                       {"department", "CSE-AIML"},
+                                       {"semester", sem},
+                                       {"contact", QString("student%1@example.edu").arg(i + 1)},
+                                       {"dateOfBirth", "2005-04-11"}});
+        }
+        QJsonArray page;
+        for (int i = offset; i < matches.size() && i < offset + limit; ++i) {
+            page.append(matches.at(i));
+        }
+        emit studentsLoaded(page, static_cast<int>(matches.size()));
     });
 }

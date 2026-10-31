@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(srs_client LANGUAGES CXX)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -21,6 +22,8 @@ add_library(srs_client_core STATIC
     src/session/Session.h
     src/shell/MainWindow.cpp
     src/shell/MainWindow.h
+    src/students/StudentsWidget.cpp
+    src/students/StudentsWidget.h
 )
 
 target_include_directories(srs_client_core PUBLIC src)

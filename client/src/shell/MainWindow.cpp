@@ -2,8 +2,11 @@
 
 #include <QAction>
 #include <QLabel>
+#include <QMenu>
 #include <QMenuBar>
 #include <QStatusBar>
+
+#include "students/StudentsWidget.h"
 
 namespace {
 
@@ -40,27 +43,33 @@ bool Allowed(Role role, Role minimum) { return Rank(role) >= Rank(minimum); }
 
 }  // namespace
 
-MainWindow::MainWindow(const Session& session, QWidget* parent)
-    : QMainWindow(parent), session_(session) {
+MainWindow::MainWindow(const Session& session, ApiClient* api, QWidget* parent)
+    : QMainWindow(parent), session_(session), api_(api) {
     setWindowTitle(QStringLiteral("Student Record System"));
     resize(900, 600);
 
-    auto addAction = [this](QMenu* menu, const char* name) {
+    auto addAction = [this](QMenu* menu, const char* name) -> QAction* {
         QAction* action = menu->addAction(QString::fromUtf8(name));
         action->setObjectName(QString::fromUtf8(name));
-        for (const auto& rule : kRules) {
-            if (QString::fromUtf8(rule.name) == QString::fromUtf8(name)) {
-                action->setEnabled(Allowed(session_.role, rule.minimum));
-                return;
-            }
-        }
         // Not in the table: deny rather than assume, so a forgotten entry fails
         // closed instead of quietly granting access.
         action->setEnabled(false);
+        for (const auto& rule : kRules) {
+            if (QString::fromUtf8(rule.name) == QString::fromUtf8(name)) {
+                action->setEnabled(Allowed(session_.role, rule.minimum));
+                break;
+            }
+        }
+        return action;
     };
 
     QMenu* students = menuBar()->addMenu(QStringLiteral("&Students"));
-    addAction(students, "View / Search");
+    QAction* viewStudents = addAction(students, "View / Search");
+    connect(viewStudents, &QAction::triggered, this, [this]() {
+        if (api_ != nullptr) {
+            setCentralWidget(new StudentsWidget(api_, this));
+        }
+    });
     addAction(students, "Add / Edit / Delete");
 
     QMenu* academics = menuBar()->addMenu(QStringLiteral("&Academics"));
