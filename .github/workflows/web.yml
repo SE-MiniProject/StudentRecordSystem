@@ -26,10 +26,23 @@ jobs:
         working-directory: web
         run: npm test
 
+      # The runner image has no usable browser: its `chromium` is a snap shim
+      # that cannot run inside the container, and spawning it fails rather than
+      # starting a browser. Install the real Chrome .deb and point the smoke
+      # test at it. `google-chrome` is in smoke.mjs's candidate list, so no
+      # CHROME= override is needed, but the env var documents the dependency.
+      - name: Install Chrome
+        run: |
+          wget -q -O /tmp/chrome.deb \
+            https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y /tmp/chrome.deb
+
       # The unit tests exercise api.js against a stubbed fetch. This step is the
       # one that proves the actual pages render and the flows work, which is
       # what the Qt widget tests used to cover. smoke.mjs starts its own static
-      # server and its own headless Chromium, so it needs no services here.
+      # server and its own headless Chrome, so it needs no services here.
       - name: Browser smoke test
         working-directory: web
         run: npm run test:smoke
+        env:
+          CHROME: google-chrome

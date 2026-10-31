@@ -48,8 +48,13 @@ async function startServer() {
 }
 
 // ---- headless Chromium with an ephemeral debug port ------------------------
+// Names the browser goes by depending on distro and install method. GitHub's
+// ubuntu-latest ships `chromium` as a snap shim that cannot run in a container,
+// so google-chrome (installed by the workflow) is tried before it.
+const CANDIDATES = ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable'];
+
 async function startChromium() {
-  const binary = process.env.CHROME || process.env.CHROMIUM || 'chromium';
+  const binary = process.env.CHROME || process.env.CHROMIUM || CANDIDATES[0];
   const args = [
     '--headless=new',
     '--remote-debugging-port=0',
@@ -75,6 +80,14 @@ async function startChromium() {
         clearTimeout(timer);
         resolve(match[1]);
       }
+    });
+    // ENOENT means the binary is not on PATH. Without this the promise waits
+    // out the full 20s timeout and reports "no DevTools endpoint", which hides
+    // the real cause behind a symptom.
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      reject(new Error(
+        `Could not start "${binary}" (${err.code}). Install it or set CHROME=/path/to/browser.`));
     });
     proc.on('exit', (code) => {
       clearTimeout(timer);
