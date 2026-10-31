@@ -15,9 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 21+ for the global WebSocket the smoke test uses to speak the
+      # DevTools protocol. On Node 20 that identifier is undefined and the test
+      # dies immediately, which is what pinned this to 22 (current LTS).
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       # The client has no build step and no dependencies, so there is nothing to
       # install. That is the point of the no-framework choice: `node --test` is
