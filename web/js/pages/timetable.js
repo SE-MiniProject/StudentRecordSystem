@@ -61,7 +61,7 @@ export function createTimetablePage({ api, session, onUnauthorized }) {
     toolbar = el(
       'form',
       {
-        class: 'toolbar',
+        class: 'toolbar record-toolbar',
         onsubmit: (event) => {
           event.preventDefault();
           load();
@@ -140,7 +140,7 @@ export function createTimetablePage({ api, session, onUnauthorized }) {
       { class: 'slot', 'data-course': slot.courseCode },
       el('strong', {}, slot.courseCode),
       el('span', { class: 'slot-name' }, slot.courseName),
-      showClass ? el('span', { class: 'slot-meta' }, `${slot.department} · Sem ${slot.semester}`) : null,
+      showClass ? el('span', { class: 'slot-meta' }, `${slot.department} · Sem\u00a0${slot.semester}`) : null,
       showTeacher ? el('span', { class: 'slot-meta' }, slot.teacherName || slot.teacher) : null,
       slot.room ? el('span', { class: 'slot-meta' }, `Room ${slot.room}`) : null,
     );
