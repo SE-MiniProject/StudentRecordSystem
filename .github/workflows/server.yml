@@ -62,7 +62,9 @@ jobs:
         run: |
           psql -v ON_ERROR_STOP=1 -f db/migrations/001_roles_users.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/002_students.sql
+          psql -v ON_ERROR_STOP=1 -f db/migrations/003_subjects_teaching.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_data.sql
+          psql -v ON_ERROR_STOP=1 -f db/seeds/demo_records.sql
 
       # Applying the whole chain a second time must change no rows. Every table
       # in db/ is expected to be re-runnable, because that is what happens when
@@ -71,11 +73,13 @@ jobs:
       # while still exiting 0, so the counts are compared, not just the status.
       - name: Migrations and seed are idempotent
         run: |
-          before=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance);")
+          before=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance)||','||(SELECT count(*) FROM subjects)||','||(SELECT count(*) FROM teacher_subjects);")
           psql -v ON_ERROR_STOP=1 -f db/migrations/001_roles_users.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/002_students.sql
+          psql -v ON_ERROR_STOP=1 -f db/migrations/003_subjects_teaching.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_data.sql
-          after=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance);")
+          psql -v ON_ERROR_STOP=1 -f db/seeds/demo_records.sql
+          after=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance)||','||(SELECT count(*) FROM subjects)||','||(SELECT count(*) FROM teacher_subjects);")
           echo "before=$before after=$after"
           if [ "$before" != "$after" ]; then
             echo "Re-applying migrations and seed changed row counts: $before -> $after"
@@ -221,6 +225,34 @@ jobs:
             -H "Authorization: Bearer $admin")
           echo "delete: $deleted"
           [ "$deleted" = "204" ] || { echo "expected 204 from delete, got $deleted"; exit 1; }
+
+          # --- SRS-F-014 view grades, role-scoped (AC-014 / TC-014) ---
+          teacher2=$(login teacher2 teacher2)
+          codes() {
+            curl -fsS "$base/api/grades/$1" -H "Authorization: Bearer $2" \
+              | python3 -c 'import json,sys; print(",".join(sorted(i["courseCode"] for i in json.load(sys.stdin)["items"])))'
+          }
+          g_admin=$(codes 1ABC26CS001 "$admin")
+          g_teacher=$(codes 1ABC26CS001 "$teacher")
+          g_teacher2=$(codes 1ABC26CS001 "$teacher2")
+          g_student=$(codes 1ABC26CS001 "$student")
+          echo "grades admin=$g_admin teacher=$g_teacher teacher2=$g_teacher2 student=$g_student"
+          [ "$g_admin" = "CS301,CS501,CS502,CS503" ] || { echo "admin should see every grade"; exit 1; }
+          [ "$g_teacher" = "CS501,CS503" ] || { echo "teacher should see only own subjects"; exit 1; }
+          [ "$g_teacher2" = "CS502" ] || { echo "teacher2 should see only own subject"; exit 1; }
+          [ "$g_student" = "$g_admin" ] || { echo "student should see all own grades"; exit 1; }
+
+          g_other=$(status_of "$base/api/grades/1ABC26CS002" -H "Authorization: Bearer $student")
+          echo "student reading another student's grades: $g_other"
+          [ "$g_other" = "403" ] || { echo "expected 403, got $g_other"; exit 1; }
+
+          me=$(curl -fsS "$base/api/me" -H "Authorization: Bearer $student")
+          echo "me: $me"
+          printf '%s' "$me" | python3 -c '
+          import json, sys
+          body = json.load(sys.stdin)
+          assert body["rollNo"] == "1ABC26CS001", body
+          '
 
           # --- SRS-19 create account, SRS-17 patch account ---
           account=$(status_of -X POST "$base/api/accounts" \

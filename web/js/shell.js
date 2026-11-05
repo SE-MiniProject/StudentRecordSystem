@@ -14,6 +14,7 @@ import { el, mount } from './dom.js';
 import { ACTIONS, canUse } from './session.js';
 import { createStudentsPage } from './pages/students.js';
 import { createAccountsPage } from './pages/accounts.js';
+import { createGradesPage } from './pages/grades.js';
 
 /**
  * @param {object} options
@@ -33,6 +34,13 @@ export function createShell({ api, session, onLogout, onUnauthorized }) {
       id: 'students',
       label: 'Students',
       build: () => createStudentsPage({ api, session, onUnauthorized }),
+    });
+  }
+  if (canUse(session.role, 'grades.view')) {
+    routes.push({
+      id: 'grades',
+      label: session.role === 'student' ? 'My grades' : 'Grades',
+      build: () => createGradesPage({ api, session, onUnauthorized }),
     });
   }
   if (canUse(session.role, 'accounts.manage')) {

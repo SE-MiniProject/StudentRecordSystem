@@ -44,6 +44,8 @@ export const ACTIONS = Object.freeze([
   { name: 'students.update', label: 'Edit Student', minimum: Role.Admin },
   { name: 'students.delete', label: 'Delete Student', minimum: Role.Admin },
   { name: 'accounts.manage', label: 'Manage Accounts', minimum: Role.Admin },
+  // Sprint 2: every role may open the page; the server scopes what it returns.
+  { name: 'grades.view', label: 'Grades', minimum: Role.Student },
 ]);
 
 /**

@@ -104,6 +104,11 @@ add_library(
     src/accounts/pg_account_store.cpp
     src/accounts/account_routes.cpp
     src/web/static_files.cpp
+    src/records/record_access.cpp
+    src/profile/pg_profile_store.cpp
+    src/profile/profile_routes.cpp
+    src/grades/pg_grade_store.cpp
+    src/grades/grade_routes.cpp
 )
 
 target_include_directories(

@@ -72,6 +72,18 @@ Opaque random string. The server stores a hash of it, never the token. Absolute 
 
 Sessions are persisted in a `sessions` table, so they survive a server restart. The server deletes expired rows on a periodic sweep and treats a row whose `expires_at` or `last_seen_at` has lapsed as invalid.
 
+## Profile
+
+### `GET /api/me` (any authenticated)
+
+The caller's own account, resolved from the session (never from the request).
+
+```json
+{ "username": "student", "fullName": "Demo Student", "role": "student", "rollNo": "1ABC26CS001" }
+```
+
+`rollNo` is the linked student for a Student account and `null` for Admin and Teacher. The client uses it to load "my grades" / "my attendance"; the server never trusts it for authorisation and re-resolves ownership on every request.
+
 ## Students
 
 | Field | Type | Create | Update | Constraint |
@@ -149,6 +161,16 @@ Query: `semester` (F-023).
 No aggregate or average is returned (F-012 requires no cross-subject averaging).
 
 Student requesting another roll number returns `403`.
+
+Role scoping (SRS-F-014, AC-014), enforced by the server:
+
+| Caller | Sees |
+| --- | --- |
+| Admin | every grade of any student |
+| Teacher | only grades in subjects assigned to them in `teacher_subjects` (200 with `items: []` when none) |
+| Student | own grades only; another roll number, including an unknown one, is `403` (never `404`, so existence is not revealed) |
+
+`courseName` and `semester` come from `subjects`; a grade whose code has no `subjects` row is returned with `courseName` equal to the code and `semester: 0`, and is visible to no teacher. `semester` outside 1–12 or non-numeric returns `400` with `fields.semester`.
 
 ### `POST /api/grades` (Admin, Teacher)
 
@@ -313,6 +335,20 @@ Logout deletes the row. Deactivating an account (`active = false`) deletes all i
 - The counter is per-account, not per-IP. Per-IP rate limiting is out of scope for this story.
 
 Both columns live in `001_roles_users.sql`, so `001` carries the whole login contract and the login route needs no follow-up migration.
+
+### Tables: subjects, teacher_subjects
+
+Created in `003_subjects_teaching.sql` for Sprint 2's role-scoped reads.
+
+| Table | Column | Constraint |
+| --- | --- | --- |
+| `subjects` | `code` | primary key |
+| `subjects` | `name` | not null, 1–120 chars |
+| `subjects` | `semester` | not null, 1–12 |
+| `teacher_subjects` | `username` | `references users(username) on delete cascade` |
+| `teacher_subjects` | `subject_code` | `references subjects(code) on delete cascade` |
+
+Primary key `(username, subject_code)`. `grades.subject_code` and `attendance.subject_code` deliberately have no FK to `subjects`, so existing inserts keep working; reads `LEFT JOIN` it. `grades` gains `updated_at timestamptz not null default now()`.
 
 ### Grades aggregate
 

@@ -639,3 +639,10 @@ dialog.modal .dialog-head {
     transition: none !important;
   }
 }
+/* ------------------------------------------- Sprint 2: grades (SRS-F-014) */
+
+.data-table th.num,
+.data-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
