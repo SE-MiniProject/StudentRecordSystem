@@ -1,7 +1,8 @@
 -- demo_records.sql
 --
 -- Sprint 2 demo data: subjects, which teacher teaches what, and extra grade
--- rows, so the role-scoped reads (SRS-F-014 grades) have something to scope.
+-- and attendance rows, so the role-scoped reads (SRS-F-014 grades, F-017/F-018
+-- attendance) have something to scope.
 -- Applied AFTER demo_data.sql, because it references the users and students
 -- that file creates:
 --
@@ -55,5 +56,26 @@ INSERT INTO grades (roll_no, subject_code, score) VALUES
     ('1ABC26CS001', 'CS301', 8.0),
     ('1ABC26CS002', 'CS502', 6.5)
 ON CONFLICT (roll_no, subject_code) DO NOTHING;
+
+-- Attendance (SRS-F-017/F-018). demo_data.sql already has, for 1ABC26CS001,
+-- CS501 on 10-20 (present) and 10-22 (absent). With the rows below the demo
+-- student's expected percentages are:
+--
+--   CS501  3 / 4  = 75.00   (teacher)
+--   CS502  2 / 3  = 66.67   (teacher2)  <- exercises two-decimal rounding
+--   CS503  1 / 1  = 100.00  (teacher)
+--   overall 6 / 8 = 75.00
+--
+-- What each role sees for 1ABC26CS001: admin and the student all three,
+-- teacher CS501 + CS503 (overall 4 / 5 = 80.00), teacher2 CS502 only.
+INSERT INTO attendance (roll_no, subject_code, session_date, present) VALUES
+    ('1ABC26CS001', 'CS501', '2026-10-27', true),
+    ('1ABC26CS001', 'CS501', '2026-10-29', true),
+    ('1ABC26CS001', 'CS502', '2026-10-21', true),
+    ('1ABC26CS001', 'CS502', '2026-10-23', true),
+    ('1ABC26CS001', 'CS502', '2026-10-28', false),
+    ('1ABC26CS001', 'CS503', '2026-10-24', true),
+    ('1ABC26CS002', 'CS502', '2026-10-21', false)
+ON CONFLICT (roll_no, subject_code, session_date) DO NOTHING;
 
 COMMIT;

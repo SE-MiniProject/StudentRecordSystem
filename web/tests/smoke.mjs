@@ -387,6 +387,12 @@ await waitFor("document.querySelectorAll('#grades-table tbody tr').length > 0", 
 check(await evalJs("document.querySelector('.page input[type=search]') === null"), 'student has no roll-number box');
 check(await evalJs("document.querySelectorAll('#grades-table tbody tr').length === 4"), 'student sees all own grades');
 
+// --- Sprint 2: attendance with server percentage (SRS-F-017/F-018) ----------
+await evalJs("[...document.querySelectorAll('.nav-item')].find(b=>b.textContent === 'My attendance').click()");
+await waitFor("document.querySelectorAll('#attendance-table tbody tr').length > 0", 'student attendance rows');
+check(await evalJs("[...document.querySelectorAll('#attendance-table tbody td[data-percentage]')].every(td => /^\\d+\\.\\d{2}%$/.test(td.textContent))"), 'percentages shown with two decimals');
+check(await evalJs("document.querySelector('#attendance-table tfoot .total-row') !== null"), 'overall row shown');
+
 await send('Target.closeTarget', { targetId: target.id }).catch(() => {});
 ws.close();
 console.log('---');

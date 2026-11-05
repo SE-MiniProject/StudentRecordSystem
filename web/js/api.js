@@ -366,6 +366,48 @@ export class ApiClient {
     }
     throw recordError(status, body, 'grades');
   }
+
+  // -- Attendance (SRS-F-017, F-018) --------------------------------------
+
+  /**
+   * GET /api/attendance/{rollNo}. Same scoping as grades. The percentage is
+   * the server's (present / conducted * 100, two decimals); the client never
+   * recomputes it. A response where present exceeds conducted is rejected here
+   * as well, so bad data can never render as e.g. 120%.
+   */
+  async getAttendance(rollNo, { semester = 0, courseCode = '', signal } = {}) {
+    const query = new URLSearchParams();
+    if (semester > 0) query.set('semester', String(semester));
+    if (courseCode) query.set('courseCode', courseCode);
+    const suffix = query.toString() ? `?${query}` : '';
+    const { status, body } = await this.request(
+      'GET',
+      `/api/attendance/${encodeURIComponent(rollNo)}${suffix}`,
+      { signal },
+    );
+    if (status === 200) return checkAttendance(body, rollNo);
+    throw recordError(status, body, 'attendance');
+  }
+}
+
+/** Validates an attendance body before any screen sees it (AC-018). */
+export function checkAttendance(body, rollNo) {
+  const items = body && Array.isArray(body.items) ? body.items : [];
+  const overall = (body && body.overall) || { conducted: 0, present: 0, percentage: null };
+  for (const row of [...items, overall]) {
+    if (
+      !Number.isInteger(row.present) ||
+      !Number.isInteger(row.conducted) ||
+      row.present < 0 ||
+      row.present > row.conducted
+    ) {
+      throw new ApiError('The server returned inconsistent attendance counts.', {
+        status: 200,
+        code: 'inconsistent_attendance',
+      });
+    }
+  }
+  return { studentRollNo: (body && body.studentRollNo) || rollNo, items, overall };
 }
 
 /**
@@ -422,6 +464,26 @@ export class MockApiClient {
     };
     this.teaches = { teacher: ['CS501', 'CS503'] };
     this.grades = MockApiClient.seedGrades(this.students);
+    this.attendance = MockApiClient.seedAttendance(this.students);
+  }
+
+  static seedAttendance(students) {
+    const codes = ['CS501', 'CS502', 'CS503', 'CS301'];
+    const rows = [];
+    students.forEach((s, i) => {
+      codes.forEach((code, j) => {
+        const conducted = 20 + ((i + j) % 5) * 4;
+        const present = Math.max(0, conducted - ((i * 5 + j * 3) % 11));
+        rows.push({ rollNo: s.rollNo, courseCode: code, conducted, present });
+      });
+    });
+    return rows;
+  }
+
+  /** Same rounding as the server: half-up to two decimals, integer maths. */
+  static percentage(present, conducted) {
+    if (!conducted) return null;
+    return Math.floor((2 * present * 10000 + conducted) / (2 * conducted)) / 100;
   }
 
   static seedGrades(students) {
@@ -617,6 +679,34 @@ export class MockApiClient {
       }))
       .filter((g) => !semester || g.semester === semester);
     return { studentRollNo: rollNo, items };
+  }
+
+  async getAttendance(rollNo, { semester = 0, courseCode = '' } = {}) {
+    await this.wait();
+    const mine = this.scopeFor(rollNo, 'attendance');
+    const items = this.attendance
+      .filter((a) => a.rollNo === rollNo)
+      .filter((a) => !mine || mine.includes(a.courseCode))
+      .filter((a) => !courseCode || a.courseCode === courseCode)
+      .filter((a) => !semester || this.subjects[a.courseCode].semester === semester)
+      .map((a) => ({
+        courseCode: a.courseCode,
+        courseName: this.subjects[a.courseCode].name,
+        semester: this.subjects[a.courseCode].semester,
+        conducted: a.conducted,
+        present: a.present,
+        percentage: MockApiClient.percentage(a.present, a.conducted),
+      }));
+    const conducted = items.reduce((n, i) => n + i.conducted, 0);
+    const present = items.reduce((n, i) => n + i.present, 0);
+    return checkAttendance(
+      {
+        studentRollNo: rollNo,
+        items,
+        overall: { conducted, present, percentage: MockApiClient.percentage(present, conducted) },
+      },
+      rollNo,
+    );
   }
 }
 

@@ -130,3 +130,82 @@ describe('navigation permissions', () => {
     }
   });
 });
+
+// -- GET /api/attendance/{rollNo} (SRS-F-017, F-018) ------------------------------
+
+describe('ApiClient.getAttendance', () => {
+  const OK = {
+    studentRollNo: '1ABC26CS001',
+    items: [{ courseCode: 'CS502', courseName: 'OS', semester: 5, conducted: 3, present: 2, percentage: 66.67 }],
+    overall: { conducted: 3, present: 2, percentage: 66.67 },
+  };
+
+  test('requests the path with optional filters', async () => {
+    const s = stub({ status: 200, body: OK });
+    await s.client().getAttendance('1ABC26CS001');
+    await s.client().getAttendance('1ABC26CS001', { semester: 5, courseCode: 'CS502' });
+    assert.equal(s.calls[0].url, '/api/attendance/1ABC26CS001');
+    assert.equal(s.calls[1].url, '/api/attendance/1ABC26CS001?semester=5&courseCode=CS502');
+  });
+
+  // AC-018: the client shows the server's two-decimal value, unchanged.
+  test('keeps the server percentage as-is', async () => {
+    const s = stub({ status: 200, body: OK });
+    const result = await s.client().getAttendance('1ABC26CS001');
+    assert.equal(result.items[0].percentage, 66.67);
+    assert.equal(result.overall.percentage, 66.67);
+  });
+
+  // AC-018: present > conducted is rejected, never rendered.
+  test('rejects a body where present exceeds conducted', async () => {
+    const bad = { ...OK, items: [{ ...OK.items[0], present: 4, conducted: 3 }] };
+    const s = stub({ status: 200, body: bad });
+    await assert.rejects(s.client().getAttendance('1ABC26CS001'), (e) => e.code === 'inconsistent_attendance');
+  });
+
+  test('403 becomes a permission message', async () => {
+    const s = stub({ status: 403, body: { error: 'forbidden' } });
+    await assert.rejects(s.client().getAttendance('X'), /permission to view that student's attendance/);
+  });
+
+  test('500 from the server keeps its request ref', async () => {
+    const s = stub({ status: 500, body: { error: 'internal', requestId: 'abc123' } });
+    await assert.rejects(s.client().getAttendance('X'), /code 500\). Ref: abc123/);
+  });
+});
+
+describe('attendance percentage formatting', () => {
+  test('two decimals, and a dash for no sessions', async () => {
+    // Imported lazily: the page module touches `document` only when a page is built.
+    const { formatPercentage } = await import('../js/pages/attendance.js');
+    assert.equal(formatPercentage(85), '85.00%');
+    assert.equal(formatPercentage(66.67), '66.67%');
+    assert.equal(formatPercentage(null), '—');
+  });
+});
+
+describe('MockApiClient attendance', () => {
+  test('mock rounding matches the server examples', () => {
+    assert.equal(MockApiClient.percentage(101, 120), 84.17);
+    assert.equal(MockApiClient.percentage(2, 3), 66.67);
+    assert.equal(MockApiClient.percentage(1, 3), 33.33);
+    assert.equal(MockApiClient.percentage(0, 0), null);
+  });
+
+  test('a teacher sees only own subjects, a student only themselves', async () => {
+    const teacher = new MockApiClient({ latency: 0 });
+    await teacher.login('teacher', 'teacher123');
+    const t = await teacher.getAttendance('PES2UG23CS101');
+    assert.deepEqual(t.items.map((i) => i.courseCode).sort(), ['CS501', 'CS503']);
+
+    const student = new MockApiClient({ latency: 0 });
+    await student.login('student', 'student123');
+    await assert.rejects(student.getAttendance('PES2UG23CS101'), (e) => e.status === 403);
+  });
+
+  test('every role may open Attendance', () => {
+    for (const role of [Role.Admin, Role.Teacher, Role.Student]) {
+      assert.equal(canUse(role, 'attendance.view'), true, role);
+    }
+  });
+});

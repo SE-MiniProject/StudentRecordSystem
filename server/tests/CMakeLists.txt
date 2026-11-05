@@ -24,6 +24,8 @@ add_executable(srs_tests
     test_student_routes.cpp
     test_static_files.cpp
     test_grade_routes.cpp
+    test_attendance_math.cpp
+    test_attendance_routes.cpp
 )
 target_link_libraries(srs_tests PRIVATE srs_core GTest::gtest_main)
 

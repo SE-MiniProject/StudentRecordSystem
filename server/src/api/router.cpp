@@ -5,6 +5,8 @@
 #include "accounts/account_routes.h"
 #include "accounts/account_store.h"
 #include "api/error_response.h"
+#include "attendance/attendance_routes.h"
+#include "attendance/attendance_store.h"
 #include "auth/login_route.h"
 #include "auth/logout_route.h"
 #include "auth/session_store.h"
@@ -94,6 +96,7 @@ void RegisterRoutes(httplib::Server& server) {
     // ownership/existence check (records/record_access.h).
     RegisterProfileRoutes(server, DefaultProfileStore(), sessions);
     RegisterGradeRoutes(server, DefaultGradeStore(), students, sessions);
+    RegisterAttendanceRoutes(server, DefaultAttendanceStore(), students, sessions);
 
     // Registered last, on purpose. The web client's catch-all path route would
     // otherwise claim /api/... and answer a JSON 404 with an HTML 404. Every
