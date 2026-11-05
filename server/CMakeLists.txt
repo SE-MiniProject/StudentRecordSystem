@@ -109,6 +109,9 @@ add_library(
     src/profile/profile_routes.cpp
     src/grades/pg_grade_store.cpp
     src/grades/grade_routes.cpp
+    src/attendance/attendance_math.cpp
+    src/attendance/pg_attendance_store.cpp
+    src/attendance/attendance_routes.cpp
 )
 
 target_include_directories(

@@ -15,6 +15,7 @@ import { ACTIONS, canUse } from './session.js';
 import { createStudentsPage } from './pages/students.js';
 import { createAccountsPage } from './pages/accounts.js';
 import { createGradesPage } from './pages/grades.js';
+import { createAttendancePage } from './pages/attendance.js';
 
 /**
  * @param {object} options
@@ -41,6 +42,13 @@ export function createShell({ api, session, onLogout, onUnauthorized }) {
       id: 'grades',
       label: session.role === 'student' ? 'My grades' : 'Grades',
       build: () => createGradesPage({ api, session, onUnauthorized }),
+    });
+  }
+  if (canUse(session.role, 'attendance.view')) {
+    routes.push({
+      id: 'attendance',
+      label: session.role === 'student' ? 'My attendance' : 'Attendance',
+      build: () => createAttendancePage({ api, session, onUnauthorized }),
     });
   }
   if (canUse(session.role, 'accounts.manage')) {

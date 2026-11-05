@@ -212,7 +212,13 @@ Query: `courseCode` (optional), `semester` (F-023).
 }
 ```
 
-`percentage` is `present / conducted * 100` rounded to two decimals, computed server-side (F-018). `conducted` counts sessions and `present` counts sessions with `status = 'present'`, so `present > conducted` cannot occur.
+`percentage` is `present / conducted * 100` rounded half-up to two decimals, computed server-side in integer arithmetic (F-018), so `101/120` is exactly `84.17`. `conducted` counts sessions and `present` counts sessions with `status = 'present'`, so `present > conducted` cannot occur from the query.
+
+`present > conducted` is nevertheless rejected at every layer (AC-018): the server answers `500 internal` rather than return such a row, and the client refuses to render one. It is never clamped to 100%.
+
+`overall` sums the counts of the returned items (it is not an average of percentages). When nothing was conducted, `percentage` is `null`, not `0`.
+
+Role scoping is the same as grades: Admin all, Teacher only their own subjects (and `overall` covers only those), Student own only — another roll number is `403`.
 
 Student requesting another roll number returns `403`.
 

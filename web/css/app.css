@@ -662,3 +662,19 @@ dialog.modal .dialog-head {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* --------------------------------- Sprint 2: attendance (SRS-F-017/F-018) */
+
+.tag.tag-risk {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: transparent;
+}
+
+.data-table tfoot .total-row th,
+.data-table tfoot .total-row td {
+  font-weight: 600;
+  background: #f7f9fc;
+  border-top: 2px solid var(--border-strong);
+  border-bottom: none;
+}

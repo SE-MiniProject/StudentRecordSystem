@@ -254,6 +254,36 @@ jobs:
           assert body["rollNo"] == "1ABC26CS001", body
           '
 
+          # --- SRS-F-017/F-018 attendance and percentage (AC-017, AC-018) ---
+          att() {
+            curl -fsS "$base/api/attendance/$1" -H "Authorization: Bearer $2"
+          }
+          att 1ABC26CS001 "$admin" | python3 -c '
+          import json, sys
+          body = json.load(sys.stdin)
+          print("attendance admin:", body)
+          pct = {i["courseCode"]: i["percentage"] for i in body["items"]}
+          assert pct == {"CS501": 75.0, "CS502": 66.67, "CS503": 100.0}, pct
+          o = body["overall"]
+          assert (o["conducted"], o["present"], o["percentage"]) == (8, 6, 75.0), o
+          for i in body["items"]:
+              assert i["present"] <= i["conducted"], i
+          '
+          att 1ABC26CS001 "$teacher" | python3 -c '
+          import json, sys
+          body = json.load(sys.stdin)
+          codes = sorted(i["courseCode"] for i in body["items"])
+          assert codes == ["CS501", "CS503"], codes
+          assert body["overall"]["percentage"] == 80.0, body["overall"]
+          '
+          att 1ABC26CS001 "$student" | python3 -c '
+          import json, sys
+          assert len(json.load(sys.stdin)["items"]) == 3
+          '
+          a_other=$(status_of "$base/api/attendance/1ABC26CS002" -H "Authorization: Bearer $student")
+          echo "student reading another student's attendance: $a_other"
+          [ "$a_other" = "403" ] || { echo "expected 403, got $a_other"; exit 1; }
+
           # --- SRS-19 create account, SRS-17 patch account ---
           account=$(status_of -X POST "$base/api/accounts" \
             -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
