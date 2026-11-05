@@ -112,6 +112,8 @@ add_library(
     src/attendance/attendance_math.cpp
     src/attendance/pg_attendance_store.cpp
     src/attendance/attendance_routes.cpp
+    src/timetable/pg_timetable_store.cpp
+    src/timetable/timetable_routes.cpp
 )
 
 target_include_directories(

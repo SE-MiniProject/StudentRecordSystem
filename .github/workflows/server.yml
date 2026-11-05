@@ -63,6 +63,7 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f db/migrations/001_roles_users.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/002_students.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/003_subjects_teaching.sql
+          psql -v ON_ERROR_STOP=1 -f db/migrations/004_timetable.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_data.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_records.sql
 
@@ -73,13 +74,14 @@ jobs:
       # while still exiting 0, so the counts are compared, not just the status.
       - name: Migrations and seed are idempotent
         run: |
-          before=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance)||','||(SELECT count(*) FROM subjects)||','||(SELECT count(*) FROM teacher_subjects);")
+          before=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance)||','||(SELECT count(*) FROM subjects)||','||(SELECT count(*) FROM teacher_subjects)||','||(SELECT count(*) FROM timetable);")
           psql -v ON_ERROR_STOP=1 -f db/migrations/001_roles_users.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/002_students.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/003_subjects_teaching.sql
+          psql -v ON_ERROR_STOP=1 -f db/migrations/004_timetable.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_data.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_records.sql
-          after=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance)||','||(SELECT count(*) FROM subjects)||','||(SELECT count(*) FROM teacher_subjects);")
+          after=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance)||','||(SELECT count(*) FROM subjects)||','||(SELECT count(*) FROM teacher_subjects)||','||(SELECT count(*) FROM timetable);")
           echo "before=$before after=$after"
           if [ "$before" != "$after" ]; then
             echo "Re-applying migrations and seed changed row counts: $before -> $after"
@@ -283,6 +285,29 @@ jobs:
           a_other=$(status_of "$base/api/attendance/1ABC26CS002" -H "Authorization: Bearer $student")
           echo "student reading another student's attendance: $a_other"
           [ "$a_other" = "403" ] || { echo "expected 403, got $a_other"; exit 1; }
+
+          # --- SRS-F-020 timetable, role-scoped (AC-020 / TC-020) ---
+          slots() {
+            curl -fsS "$base/api/timetable$1" -H "Authorization: Bearer $2" \
+              | python3 -c 'import json,sys; b=json.load(sys.stdin); print(len(b["items"]), ",".join(sorted({i["teacher"] for i in b["items"]})), ",".join(sorted({str(i["semester"]) for i in b["items"]})))'
+          }
+          t_admin=$(slots "" "$admin")
+          t_teacher=$(slots "" "$teacher")
+          t_teacher2=$(slots "" "$teacher2")
+          t_student=$(slots "" "$student")
+          echo "timetable admin=[$t_admin] teacher=[$t_teacher] teacher2=[$t_teacher2] student=[$t_student]"
+          [ "$t_admin" = "8 teacher,teacher2 3,5" ] || { echo "admin should see all 8 slots"; exit 1; }
+          [ "$t_teacher" = "4 teacher 5" ] || { echo "teacher should see only own 4 slots"; exit 1; }
+          [ "$t_teacher2" = "4 teacher2 3,5" ] || { echo "teacher2 should see only own 4 slots"; exit 1; }
+          [ "$t_student" = "6 teacher,teacher2 5" ] || { echo "student should see own class (6 slots)"; exit 1; }
+
+          t_cross=$(status_of "$base/api/timetable?teacher=teacher2" -H "Authorization: Bearer $teacher")
+          t_class=$(status_of "$base/api/timetable?semester=3" -H "Authorization: Bearer $student")
+          t_roll=$(status_of "$base/api/timetable/1ABC26CS002" -H "Authorization: Bearer $student")
+          t_own=$(status_of "$base/api/timetable/1ABC26CS001" -H "Authorization: Bearer $student")
+          echo "cross-user: teacher->teacher2=$t_cross student->sem3=$t_class student->other roll=$t_roll own roll=$t_own"
+          [ "$t_cross" = "403" ] && [ "$t_class" = "403" ] && [ "$t_roll" = "403" ] && [ "$t_own" = "200" ] \
+            || { echo "cross-user timetable fetch was not rejected"; exit 1; }
 
           # --- SRS-19 create account, SRS-17 patch account ---
           account=$(status_of -X POST "$base/api/accounts" \

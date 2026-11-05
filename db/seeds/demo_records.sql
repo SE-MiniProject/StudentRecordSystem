@@ -9,6 +9,7 @@
 --   psql "$DATABASE_URL" -f db/migrations/001_roles_users.sql
 --   psql "$DATABASE_URL" -f db/migrations/002_students.sql
 --   psql "$DATABASE_URL" -f db/migrations/003_subjects_teaching.sql
+--   psql "$DATABASE_URL" -f db/migrations/004_timetable.sql
 --   psql "$DATABASE_URL" -f db/seeds/demo_data.sql
 --   psql "$DATABASE_URL" -f db/seeds/demo_records.sql
 --
@@ -77,5 +78,33 @@ INSERT INTO attendance (roll_no, subject_code, session_date, present) VALUES
     ('1ABC26CS001', 'CS503', '2026-10-24', true),
     ('1ABC26CS002', 'CS502', '2026-10-21', false)
 ON CONFLICT (roll_no, subject_code, session_date) DO NOTHING;
+
+-- Timetable (SRS-F-020). A second class (Computer Science, semester 3) with a
+-- subject that has no grades or attendance, so adding it changes nothing the
+-- grade/attendance checks above expect.
+INSERT INTO subjects (code, name, semester) VALUES
+    ('CS302', 'Discrete Mathematics', 3)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO teacher_subjects (username, subject_code) VALUES
+    ('teacher2', 'CS302')
+ON CONFLICT (username, subject_code) DO NOTHING;
+
+-- Expected per role:
+--   student  (Computer Science, sem 5)  6 slots, the whole sem-5 week
+--   teacher  4 slots (CS501 x2, CS503 x2)
+--   teacher2 4 slots (CS502 x2, CS302 x2)
+--   admin    8 slots
+INSERT INTO timetable (subject_code, teacher_username, department, semester,
+                       day_of_week, start_time, end_time, room) VALUES
+    ('CS501', 'teacher',  'Computer Science', 5, 1, '09:00', '10:00', 'A101'),
+    ('CS502', 'teacher2', 'Computer Science', 5, 1, '10:00', '11:00', 'A101'),
+    ('CS503', 'teacher',  'Computer Science', 5, 2, '09:00', '10:00', 'A102'),
+    ('CS501', 'teacher',  'Computer Science', 5, 3, '11:00', '12:00', 'A101'),
+    ('CS502', 'teacher2', 'Computer Science', 5, 4, '14:00', '15:00', 'Lab 2'),
+    ('CS503', 'teacher',  'Computer Science', 5, 5, '10:00', '11:00', 'A102'),
+    ('CS302', 'teacher2', 'Computer Science', 3, 1, '11:00', '12:00', 'B201'),
+    ('CS302', 'teacher2', 'Computer Science', 3, 3, '09:00', '10:00', 'B201')
+ON CONFLICT DO NOTHING;
 
 COMMIT;

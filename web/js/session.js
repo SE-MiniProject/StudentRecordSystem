@@ -47,6 +47,7 @@ export const ACTIONS = Object.freeze([
   // Sprint 2: every role may open the page; the server scopes what it returns.
   { name: 'grades.view', label: 'Grades', minimum: Role.Student },
   { name: 'attendance.view', label: 'Attendance', minimum: Role.Student },
+  { name: 'timetable.view', label: 'Timetable', minimum: Role.Student },
 ]);
 
 /**

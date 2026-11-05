@@ -19,6 +19,8 @@
 #include "profile/profile_store.h"
 #include "students/student_routes.h"
 #include "students/student_store.h"
+#include "timetable/timetable_routes.h"
+#include "timetable/timetable_store.h"
 #include "web/static_files.h"
 
 namespace srs {
@@ -97,6 +99,8 @@ void RegisterRoutes(httplib::Server& server) {
     RegisterProfileRoutes(server, DefaultProfileStore(), sessions);
     RegisterGradeRoutes(server, DefaultGradeStore(), students, sessions);
     RegisterAttendanceRoutes(server, DefaultAttendanceStore(), students, sessions);
+    RegisterTimetableRoutes(server, DefaultTimetableStore(), DefaultProfileStore(), students,
+                            sessions);
 
     // Registered last, on purpose. The web client's catch-all path route would
     // otherwise claim /api/... and answer a JSON 404 with an HTML 404. Every

@@ -388,6 +388,37 @@ export class ApiClient {
     if (status === 200) return checkAttendance(body, rollNo);
     throw recordError(status, body, 'attendance');
   }
+
+  // -- Timetable (SRS-F-020) -----------------------------------------------
+
+  /**
+   * GET /api/timetable — the caller's own schedule, scoped by the server:
+   * Teacher own slots, Student own class, Admin all (filters optional, Admin
+   * only). Asking for anyone else's schedule is a 403 from the server.
+   */
+  async getTimetable({ teacher = '', department = '', semester = 0, signal } = {}) {
+    const query = new URLSearchParams();
+    if (teacher) query.set('teacher', teacher);
+    if (department) query.set('department', department);
+    if (semester > 0) query.set('semester', String(semester));
+    const suffix = query.toString() ? `?${query}` : '';
+    const { status, body } = await this.request('GET', `/api/timetable${suffix}`, { signal });
+    if (status === 200) {
+      return {
+        scope: (body && body.scope) || {},
+        items: body && Array.isArray(body.items) ? body.items : [],
+      };
+    }
+    const env = errorEnvelope(body);
+    if (status === 401) throw new ApiError(SESSION_EXPIRED, { status, ...env });
+    if (status === 403) {
+      throw new ApiError('You can only view your own schedule.', { status, ...env });
+    }
+    if (status === 400) {
+      throw new ApiError('Please check the filters and try again.', { status, ...env });
+    }
+    throw new ApiError(ApiClient.unexpected(status, body), { status, ...env });
+  }
 }
 
 /** Validates an attendance body before any screen sees it (AC-018). */
@@ -455,7 +486,7 @@ export class MockApiClient {
     // demo student is linked to one roll number, and the demo teacher teaches
     // two subjects, so role scoping is visible without a server.
     this.current = null;
-    this.studentRollNo = 'PES2UG23CS102';
+    this.studentRollNo = 'PES2UG23CS105'; // CSE-AIML, semester 5
     this.subjects = {
       CS501: { name: 'Database Management Systems', semester: 5 },
       CS502: { name: 'Operating Systems', semester: 5 },
@@ -465,6 +496,22 @@ export class MockApiClient {
     this.teaches = { teacher: ['CS501', 'CS503'] };
     this.grades = MockApiClient.seedGrades(this.students);
     this.attendance = MockApiClient.seedAttendance(this.students);
+    this.teacherNames = { teacher: 'Demo Teacher', teacher2: 'Second Teacher' };
+    const slot = (id, day, start, end, code, teacher, department, semester, room) => ({
+      id, dayOfWeek: day, startTime: start, endTime: end, courseCode: code,
+      courseName: this.subjects[code].name, teacher, teacherName: this.teacherNames[teacher],
+      department, semester, room,
+    });
+    this.timetable = [
+      slot(1, 1, '09:00', '10:00', 'CS501', 'teacher', 'CSE-AIML', 5, 'A101'),
+      slot(2, 1, '10:00', '11:00', 'CS502', 'teacher2', 'CSE-AIML', 5, 'A101'),
+      slot(3, 2, '09:00', '10:00', 'CS503', 'teacher', 'CSE-AIML', 5, 'A102'),
+      slot(4, 3, '11:00', '12:00', 'CS501', 'teacher', 'CSE-AIML', 5, 'A101'),
+      slot(5, 4, '14:00', '15:00', 'CS502', 'teacher2', 'CSE-AIML', 5, 'Lab 2'),
+      slot(6, 5, '10:00', '11:00', 'CS503', 'teacher', 'CSE-AIML', 5, 'A102'),
+      slot(7, 1, '11:00', '12:00', 'CS301', 'teacher2', 'CSE', 3, 'B201'),
+      slot(8, 3, '09:00', '10:00', 'CS301', 'teacher2', 'CSE', 3, 'B201'),
+    ];
   }
 
   static seedAttendance(students) {
@@ -707,6 +754,40 @@ export class MockApiClient {
       },
       rollNo,
     );
+  }
+
+  async getTimetable({ teacher = '', department = '', semester = 0 } = {}) {
+    await this.wait();
+    const who = this.current || { role: 'admin', username: 'admin' };
+    const forbid = () => {
+      throw new ApiError('You can only view your own schedule.', { status: 403 });
+    };
+    let filter = { teacher, department, semester };
+    if (who.role === 'teacher') {
+      if (teacher && teacher !== who.username) forbid();
+      filter = { ...filter, teacher: who.username };
+    } else if (who.role === 'student') {
+      const own = this.students.find((s) => s.rollNo === this.studentRollNo);
+      if (teacher || (department && department !== own.department) || (semester && semester !== own.semester)) {
+        forbid();
+      }
+      filter = { teacher: '', department: own.department, semester: own.semester };
+    }
+    const items = this.timetable.filter(
+      (t) =>
+        (!filter.teacher || t.teacher === filter.teacher) &&
+        (!filter.department || t.department === filter.department) &&
+        (!filter.semester || t.semester === filter.semester),
+    );
+    return {
+      scope: {
+        role: who.role,
+        teacher: filter.teacher || null,
+        department: filter.department || null,
+        semester: filter.semester || null,
+      },
+      items: items.map((t) => ({ ...t })),
+    };
   }
 }
 
