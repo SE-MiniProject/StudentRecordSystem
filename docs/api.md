@@ -11,7 +11,7 @@ The contract is unchanged by the move from the Qt desktop client to the browser 
 - Timestamps ISO 8601 UTC: `2026-10-26T14:03:00Z`. Dates `YYYY-MM-DD`.
 - Students are addressed by roll number, which is immutable after create (F-010).
 - Unknown request fields are ignored.
-- Timetable endpoints are not implemented.
+- Timetable endpoints are read-only in Sprint 2 (`GET`); `POST /api/timetable` is not implemented.
 
 ## Errors
 
@@ -247,14 +247,46 @@ Body, all optional: `fullName`, `role`, `active`, `password`.
 
 Returns `200` with the updated account, `404` if absent. Setting `active: false` revokes the user's sessions and blocks login (F-006).
 
-## Timetable (not implemented)
+## Timetable
 
-| Endpoint | Role |
-| --- | --- |
-| `GET /api/timetable/{studentRollNo}` | Admin, Teacher, Student (self) |
-| `POST /api/timetable` | Admin |
+A slot is one weekly class: a subject taught by a teacher to one class (`department` + `semester`) on one ISO weekday.
 
-TC-019, TC-020 and TC-021 are marked not implemented in the test plan.
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | integer | |
+| `dayOfWeek` | integer | ISO, 1 = Monday … 7 = Sunday |
+| `startTime`, `endTime` | `HH:MM` | `endTime` after `startTime` |
+| `courseCode`, `courseName` | string | |
+| `teacher`, `teacherName` | string | username and full name |
+| `department`, `semester` | string, integer | the class |
+| `room` | string | may be empty |
+
+### `GET /api/timetable` (any authenticated) — SRS-F-020
+
+The caller's own schedule, scoped by the server (AC-020):
+
+| Caller | Returns | Refused with `403` |
+| --- | --- | --- |
+| Admin | every slot; optional `teacher`, `department`, `semester` filters | — |
+| Teacher | only slots they teach | `teacher` naming anyone else |
+| Student | only their own class (their student record's department and semester) | any `teacher`; a `department` or `semester` other than their own; an account with no linked student |
+
+```json
+{
+  "scope": { "role": "student", "teacher": null, "department": "Computer Science", "semester": 5 },
+  "items": [ { "id": 1, "dayOfWeek": 1, "startTime": "09:00", "endTime": "10:00", "courseCode": "CS501", "courseName": "Database Management Systems", "teacher": "teacher", "teacherName": "Demo Teacher", "department": "Computer Science", "semester": 5, "room": "A101" } ]
+}
+```
+
+`scope` echoes what the server filtered on. Ordered by `dayOfWeek`, then `startTime`.
+
+### `GET /api/timetable/{studentRollNo}` (Admin, Student (self))
+
+That student's class timetable, same shape. A Student requesting another roll number (or an unknown one) gets `403`; a Teacher gets `403` (they use `GET /api/timetable` for their own schedule — this narrows the earlier "Admin, Teacher, Student (self)" line so that no user can fetch another user's schedule). Admin with an unknown roll number gets `404`.
+
+### `POST /api/timetable` (Admin)
+
+Not implemented. TC-019 and TC-021 remain not implemented in the test plan; TC-020 is implemented.
 
 ## Decisions
 
@@ -355,6 +387,14 @@ Created in `003_subjects_teaching.sql` for Sprint 2's role-scoped reads.
 | `teacher_subjects` | `subject_code` | `references subjects(code) on delete cascade` |
 
 Primary key `(username, subject_code)`. `grades.subject_code` and `attendance.subject_code` deliberately have no FK to `subjects`, so existing inserts keep working; reads `LEFT JOIN` it. `grades` gains `updated_at timestamptz not null default now()`.
+
+### Table: timetable
+
+Created in `004_timetable.sql`. A class is `(department, semester)`, matching the `students` columns, so no `classes` table is needed yet.
+
+- `(teacher_username, subject_code)` references `teacher_subjects` — a teacher can only be timetabled for a subject assigned to them, so "own schedule" and "own subjects" cannot disagree.
+- `UNIQUE (department, semester, day_of_week, start_time)` and `UNIQUE (teacher_username, day_of_week, start_time)`: neither a class nor a teacher is double-booked.
+- `CHECK (end_time > start_time)`, `day_of_week` 1–7.
 
 ### Grades aggregate
 

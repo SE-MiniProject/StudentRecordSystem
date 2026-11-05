@@ -16,6 +16,7 @@ import { createStudentsPage } from './pages/students.js';
 import { createAccountsPage } from './pages/accounts.js';
 import { createGradesPage } from './pages/grades.js';
 import { createAttendancePage } from './pages/attendance.js';
+import { createTimetablePage } from './pages/timetable.js';
 
 /**
  * @param {object} options
@@ -49,6 +50,13 @@ export function createShell({ api, session, onLogout, onUnauthorized }) {
       id: 'attendance',
       label: session.role === 'student' ? 'My attendance' : 'Attendance',
       build: () => createAttendancePage({ api, session, onUnauthorized }),
+    });
+  }
+  if (canUse(session.role, 'timetable.view')) {
+    routes.push({
+      id: 'timetable',
+      label: session.role === 'admin' ? 'Timetable' : 'My timetable',
+      build: () => createTimetablePage({ api, session, onUnauthorized }),
     });
   }
   if (canUse(session.role, 'accounts.manage')) {

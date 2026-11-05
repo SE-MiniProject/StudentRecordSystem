@@ -393,6 +393,12 @@ await waitFor("document.querySelectorAll('#attendance-table tbody tr').length > 
 check(await evalJs("[...document.querySelectorAll('#attendance-table tbody td[data-percentage]')].every(td => /^\\d+\\.\\d{2}%$/.test(td.textContent))"), 'percentages shown with two decimals');
 check(await evalJs("document.querySelector('#attendance-table tfoot .total-row') !== null"), 'overall row shown');
 
+// --- Sprint 2: timetable, student sees own class only (SRS-F-020) ------------
+await evalJs("[...document.querySelectorAll('.nav-item')].find(b=>b.textContent === 'My timetable').click()");
+await waitFor("document.querySelectorAll('#timetable-grid .slot').length > 0", 'student timetable');
+check(await evalJs("document.querySelectorAll('#timetable-grid .slot').length === 6"), 'student sees own class schedule (6 slots)');
+check(await evalJs("document.querySelector('.page form.toolbar') === null"), 'student has no timetable filters');
+
 await send('Target.closeTarget', { targetId: target.id }).catch(() => {});
 ws.close();
 console.log('---');

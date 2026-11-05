@@ -209,3 +209,83 @@ describe('MockApiClient attendance', () => {
     }
   });
 });
+
+// -- GET /api/timetable (SRS-F-020) ------------------------------------------------
+
+describe('ApiClient.getTimetable', () => {
+  test('no filters by default; admin filters go in the query', async () => {
+    const s = stub({ status: 200, body: { scope: { role: 'teacher' }, items: [] } });
+    await s.client().getTimetable();
+    await s.client().getTimetable({ teacher: 't2', department: 'Computer Science', semester: 5 });
+    assert.equal(s.calls[0].url, '/api/timetable');
+    assert.equal(s.calls[1].url, '/api/timetable?teacher=t2&department=Computer+Science&semester=5');
+  });
+
+  // TC-020: a cross-user fetch is refused by the server; the client words it.
+  test('403 says you can only view your own schedule', async () => {
+    const s = stub({ status: 403, body: { error: 'forbidden' } });
+    await assert.rejects(s.client().getTimetable({ teacher: 'other' }), (e) => {
+      assert.equal(e.status, 403);
+      assert.match(e.message, /only view your own schedule/);
+      return true;
+    });
+  });
+});
+
+describe('timetable layout', () => {
+  test('weekdays across, ordered time rows down, slots placed by day and time', async () => {
+    const { layoutWeek } = await import('../js/pages/timetable.js');
+    const items = [
+      { id: 2, dayOfWeek: 3, startTime: '11:00', endTime: '12:00', courseCode: 'B' },
+      { id: 1, dayOfWeek: 1, startTime: '09:00', endTime: '10:00', courseCode: 'A' },
+      { id: 3, dayOfWeek: 1, startTime: '11:00', endTime: '12:00', courseCode: 'C' },
+    ];
+    const { days, times, cells } = layoutWeek(items);
+    assert.deepEqual(days, [1, 2, 3, 4, 5]);
+    assert.deepEqual(times, ['09:00–10:00', '11:00–12:00']);
+    assert.equal(cells.get('1|09:00–10:00')[0].courseCode, 'A');
+    assert.equal(cells.get('3|11:00–12:00')[0].courseCode, 'B');
+    assert.equal(cells.get('2|09:00–10:00'), undefined);
+  });
+
+  test('Saturday appears only when used', async () => {
+    const { layoutWeek } = await import('../js/pages/timetable.js');
+    const { days } = layoutWeek([{ dayOfWeek: 6, startTime: '09:00', endTime: '10:00' }]);
+    assert.deepEqual(days, [1, 2, 3, 4, 5, 6]);
+  });
+});
+
+describe('MockApiClient timetable scoping', () => {
+  async function as(username, password) {
+    const api = new MockApiClient({ latency: 0 });
+    await api.login(username, password);
+    return api;
+  }
+
+  test('teacher sees own schedule and cannot ask for another teacher', async () => {
+    const api = await as('teacher', 'teacher123');
+    const { items } = await api.getTimetable();
+    assert.ok(items.length > 0);
+    assert.ok(items.every((s) => s.teacher === 'teacher'));
+    await assert.rejects(api.getTimetable({ teacher: 'teacher2' }), (e) => e.status === 403);
+  });
+
+  test('student sees own class only and cannot ask for another class', async () => {
+    const api = await as('student', 'student123');
+    const { items, scope } = await api.getTimetable();
+    assert.ok(items.length > 0);
+    assert.ok(items.every((s) => s.department === scope.department && s.semester === scope.semester));
+    await assert.rejects(api.getTimetable({ semester: 3 }), (e) => e.status === 403);
+  });
+
+  test('admin sees every slot', async () => {
+    const api = await as('admin', 'admin123');
+    assert.equal((await api.getTimetable()).items.length, 8);
+  });
+
+  test('every role may open the timetable', () => {
+    for (const role of [Role.Admin, Role.Teacher, Role.Student]) {
+      assert.equal(canUse(role, 'timetable.view'), true, role);
+    }
+  });
+});
