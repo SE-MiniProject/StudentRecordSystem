@@ -178,7 +178,9 @@ await evalJs(`(() => {
 await waitFor("document.querySelector('.shell') !== null", 'shell');
 check(true, 'admin login reaches the shell');
 check(await evalJs("JSON.parse(localStorage.getItem('srs.session')||'null')?.role === 'admin'"), 'session persisted to localStorage');
-check(await evalJs("[...document.querySelectorAll('.nav-item')].map(b=>b.textContent).join(',') === 'Students,Accounts'"), 'admin sees Students and Accounts');
+// Sprint 2 adds record pages after Students, so the admin nav is checked for
+// what must be there rather than as one exact string that every new page breaks.
+check(await evalJs("(() => { const n = [...document.querySelectorAll('.nav-item')].map(b=>b.textContent); return n[0] === 'Students' && n.includes('Accounts'); })()"), 'admin sees Students and Accounts');
 
 // students list
 await waitFor("document.querySelectorAll('.data-table tbody tr').length > 0", 'student rows');
@@ -355,8 +357,35 @@ await evalJs(`(() => {
   document.querySelector('.login-form button[type=submit]').click();
 })()`);
 await waitFor("document.querySelector('.shell') !== null", 'teacher shell');
-check(await evalJs("[...document.querySelectorAll('.nav-item')].map(b=>b.textContent).join(',') === 'Students'"), 'teacher sees Students only');
+check(await evalJs("(() => { const n = [...document.querySelectorAll('.nav-item')].map(b=>b.textContent); return n[0] === 'Students' && !n.includes('Accounts'); })()"), 'teacher sees Students but not Accounts');
 check(await evalJs("![...document.querySelectorAll('button')].some(b=>/Add student/.test(b.textContent))"), 'teacher cannot see Add student');
+
+// --- Sprint 2: grades are role-scoped (SRS-F-014) ---------------------------
+// Teacher looks up a student and sees only their own two subjects.
+await evalJs("[...document.querySelectorAll('.nav-item')].find(b=>b.textContent === 'Grades').click()");
+await waitFor("document.getElementById('grades-table') !== null", 'grades page');
+await evalJs(`(() => {
+  const input = document.querySelector('.page input[type=search]');
+  input.value = 'PES2UG23CS101';
+  input.form.requestSubmit();
+})()`);
+await waitFor("document.querySelectorAll('#grades-table tbody tr').length > 0", 'teacher grade rows');
+check(await evalJs("[...document.querySelectorAll('#grades-table tbody tr td:first-child')].map(td=>td.textContent).sort().join(',') === 'CS501,CS503'"), 'teacher sees only own subjects');
+
+await evalJs("[...document.querySelectorAll('button')].find(b=>/log out/i.test(b.textContent)).click()");
+await waitFor("document.querySelector('.login-card') !== null", 'back to login (teacher)');
+
+// Student: no roll-number box, own grades load straight away.
+await evalJs(`(() => {
+  document.getElementById('login-username').value = 'student';
+  document.getElementById('login-password').value = 'student123';
+  document.querySelector('.login-form button[type=submit]').click();
+})()`);
+await waitFor("document.querySelector('.shell') !== null", 'student shell');
+await evalJs("[...document.querySelectorAll('.nav-item')].find(b=>b.textContent === 'My grades').click()");
+await waitFor("document.querySelectorAll('#grades-table tbody tr').length > 0", 'student grade rows');
+check(await evalJs("document.querySelector('.page input[type=search]') === null"), 'student has no roll-number box');
+check(await evalJs("document.querySelectorAll('#grades-table tbody tr').length === 4"), 'student sees all own grades');
 
 await send('Target.closeTarget', { targetId: target.id }).catch(() => {});
 ws.close();

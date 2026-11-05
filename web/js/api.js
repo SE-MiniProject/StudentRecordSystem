@@ -322,6 +322,70 @@ export class ApiClient {
     if (status === 404) throw new ApiError('No account with that username.', { status, ...errorEnvelope(body) });
     throw new ApiError(ApiClient.unexpected(status, body), { status, ...errorEnvelope(body) });
   }
+
+  // -- Profile (Sprint 2) -------------------------------------------------
+
+  /**
+   * GET /api/me — the caller's own profile. `rollNo` is the linked student for
+   * a Student and null otherwise; it is how "my grades" finds its roll number.
+   */
+  async getMe({ signal } = {}) {
+    const { status, body } = await this.request('GET', '/api/me', { signal });
+    if (status === 200 && body && typeof body === 'object') {
+      return {
+        username: body.username || '',
+        fullName: body.fullName || '',
+        role: body.role || '',
+        rollNo: typeof body.rollNo === 'string' && body.rollNo ? body.rollNo : null,
+      };
+    }
+    if (status === 401) throw new ApiError(SESSION_EXPIRED, { status, ...errorEnvelope(body) });
+    throw new ApiError(ApiClient.unexpected(status, body), { status, ...errorEnvelope(body) });
+  }
+
+  // -- Grades (SRS-F-014) --------------------------------------------------
+
+  /**
+   * GET /api/grades/{rollNo}. The server decides what the caller may see:
+   * Admin everything, Teacher only their own subjects, Student only their own
+   * roll number (403 otherwise). The client renders what comes back and never
+   * filters further — scoping is not a client concern.
+   */
+  async getGrades(rollNo, { semester = 0, signal } = {}) {
+    const query = semester > 0 ? `?semester=${encodeURIComponent(semester)}` : '';
+    const { status, body } = await this.request(
+      'GET',
+      `/api/grades/${encodeURIComponent(rollNo)}${query}`,
+      { signal },
+    );
+    if (status === 200) {
+      return {
+        studentRollNo: (body && body.studentRollNo) || rollNo,
+        items: (body && Array.isArray(body.items) ? body.items : []),
+      };
+    }
+    throw recordError(status, body, 'grades');
+  }
+}
+
+/**
+ * The shared status mapping for the per-student record reads (grades,
+ * attendance). One function so both pages word a 403 and a 404 the same way.
+ */
+function recordError(status, body, what) {
+  const env = errorEnvelope(body);
+  if (status === 401) return new ApiError(SESSION_EXPIRED, { status, ...env });
+  if (status === 403) {
+    return new ApiError(`You do not have permission to view that student's ${what}.`, {
+      status,
+      ...env,
+    });
+  }
+  if (status === 404) return new ApiError('No student with that roll number.', { status, ...env });
+  if (status === 400) {
+    return new ApiError('Please check the filters and try again.', { status, ...env });
+  }
+  return new ApiError(ApiClient.unexpected(status, body), { status, ...env });
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +409,44 @@ export class MockApiClient {
       ['teacher', 'teacher123'],
       ['student', 'student123'],
     ]);
+    // Sprint 2 demo records. Mirrors db/seeds/demo_records.sql in spirit: the
+    // demo student is linked to one roll number, and the demo teacher teaches
+    // two subjects, so role scoping is visible without a server.
+    this.current = null;
+    this.studentRollNo = 'PES2UG23CS102';
+    this.subjects = {
+      CS501: { name: 'Database Management Systems', semester: 5 },
+      CS502: { name: 'Operating Systems', semester: 5 },
+      CS503: { name: 'Computer Networks', semester: 5 },
+      CS301: { name: 'Data Structures', semester: 3 },
+    };
+    this.teaches = { teacher: ['CS501', 'CS503'] };
+    this.grades = MockApiClient.seedGrades(this.students);
+  }
+
+  static seedGrades(students) {
+    const codes = ['CS501', 'CS502', 'CS503', 'CS301'];
+    const rows = [];
+    students.forEach((s, i) => {
+      codes.forEach((code, j) => {
+        rows.push({ rollNo: s.rollNo, courseCode: code, grade: ((i * 3 + j * 7) % 41) / 10 + 6 });
+      });
+    });
+    return rows;
+  }
+
+  /** The same three-way rule the server applies; returns the teacher filter. */
+  scopeFor(rollNo, what) {
+    const who = this.current || { role: 'admin', username: 'admin' };
+    if (who.role === 'student' && rollNo !== this.studentRollNo) {
+      throw new ApiError(`You do not have permission to view that student's ${what}.`, {
+        status: 403,
+      });
+    }
+    if (!this.students.some((s) => s.rollNo === rollNo)) {
+      throw new ApiError('No student with that roll number.', { status: 404 });
+    }
+    return who.role === 'teacher' ? this.teaches[who.username] || [] : null;
   }
 
   static seed() {
@@ -382,6 +484,7 @@ export class MockApiClient {
     const locked = (this.failures.get(username) || 0) >= 5;
     if (user && user.active && !locked && this.passwords.get(username) === password) {
       this.failures.delete(username);
+      this.current = user;
       const session = makeSession({ ...user, token: 'mock-token' });
       return { session, expiresAt: '' };
     }
@@ -486,6 +589,34 @@ export class MockApiClient {
     if (typeof changes.active === 'boolean') found.active = changes.active;
     if (changes.password) this.passwords.set(username, changes.password);
     return { ...found };
+  }
+
+  async getMe() {
+    await this.wait();
+    const who = this.current || this.accounts[0];
+    return {
+      username: who.username,
+      fullName: who.fullName,
+      role: who.role,
+      rollNo: who.role === 'student' ? this.studentRollNo : null,
+    };
+  }
+
+  async getGrades(rollNo, { semester = 0 } = {}) {
+    await this.wait();
+    const mine = this.scopeFor(rollNo, 'grades');
+    const items = this.grades
+      .filter((g) => g.rollNo === rollNo)
+      .filter((g) => !mine || mine.includes(g.courseCode))
+      .map((g) => ({
+        courseCode: g.courseCode,
+        courseName: this.subjects[g.courseCode].name,
+        grade: Math.round(g.grade * 10) / 10,
+        semester: this.subjects[g.courseCode].semester,
+        updatedAt: '2026-11-01T09:00:00Z',
+      }))
+      .filter((g) => !semester || g.semester === semester);
+    return { studentRollNo: rollNo, items };
   }
 }
 

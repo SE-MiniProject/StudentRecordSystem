@@ -9,8 +9,12 @@
 #include "auth/logout_route.h"
 #include "auth/session_store.h"
 #include "auth/user_store.h"
+#include "grades/grade_routes.h"
+#include "grades/grade_store.h"
 #include "httplib.h"
 #include "nlohmann/json.hpp"
+#include "profile/profile_routes.h"
+#include "profile/profile_store.h"
 #include "students/student_routes.h"
 #include "students/student_store.h"
 #include "web/static_files.h"
@@ -85,6 +89,11 @@ void RegisterRoutes(httplib::Server& server) {
 
     AccountStore& accounts = DefaultAccountStore();
     RegisterAccountRoutes(server, accounts, sessions);
+
+    // Sprint 2 role-scoped reads. Each takes the student store for the shared
+    // ownership/existence check (records/record_access.h).
+    RegisterProfileRoutes(server, DefaultProfileStore(), sessions);
+    RegisterGradeRoutes(server, DefaultGradeStore(), students, sessions);
 
     // Registered last, on purpose. The web client's catch-all path route would
     // otherwise claim /api/... and answer a JSON 404 with an HTML 404. Every
