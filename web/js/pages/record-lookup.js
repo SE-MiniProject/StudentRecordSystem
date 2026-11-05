@@ -45,7 +45,7 @@ export function createRecordLookup({ api, session, onLookup, onError }) {
   const node = el(
     'form',
     {
-      class: 'toolbar',
+      class: 'toolbar record-toolbar',
       onsubmit: (event) => {
         event.preventDefault();
         fire();

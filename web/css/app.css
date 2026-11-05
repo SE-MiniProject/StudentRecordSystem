@@ -641,6 +641,22 @@ dialog.modal .dialog-head {
 }
 /* ------------------------------------------- Sprint 2: grades (SRS-F-014) */
 
+/* Raw controls (no .field wrapper) laid out in one row, wrapping on narrow
+   screens. Scoped to the Sprint 2 toolbars so Sprint 1's pages are untouched. */
+.toolbar.record-toolbar {
+  align-items: center;
+}
+
+.toolbar.record-toolbar > input,
+.toolbar.record-toolbar > select {
+  width: auto;
+  flex: 1 1 12rem;
+}
+
+.toolbar.record-toolbar > select {
+  flex: 0 1 11rem;
+}
+
 .data-table th.num,
 .data-table td.num {
   text-align: right;

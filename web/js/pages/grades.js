@@ -26,7 +26,6 @@ export function createGradesPage({ api, session, onUnauthorized }) {
   const isStudent = session.role === Role.Student;
   const status = statusBar();
   const tableBody = el('tbody');
-  const subtitle = el('p', { class: 'muted small' });
 
   const lookup = createRecordLookup({
     api,
@@ -70,7 +69,6 @@ export function createGradesPage({ api, session, onUnauthorized }) {
     ),
     lookup.node,
     status.node,
-    subtitle,
     el('div', { class: 'table-wrap' }, table),
   );
 
@@ -84,7 +82,6 @@ export function createGradesPage({ api, session, onUnauthorized }) {
     const mine = ++generation;
     lookup.setBusy(true);
     status.set('Loading…', 'info');
-    subtitle.textContent = '';
     try {
       const result = await api.getGrades(rollNo, { semester });
       if (mine !== generation) return; // a newer lookup superseded this one
@@ -98,13 +95,12 @@ export function createGradesPage({ api, session, onUnauthorized }) {
   }
 
   function render({ studentRollNo, items }) {
-    subtitle.textContent = `Roll number ${studentRollNo}`;
     if (items.length === 0) {
       mount(
         tableBody,
         el('tr', {}, el('td', { class: 'empty', colSpan: 5 }, 'No grades to show.')),
       );
-      status.set('No grades found.', 'info');
+      status.set(`Roll number ${studentRollNo} · no grades found.`, 'info');
       return;
     }
     mount(
@@ -121,12 +117,11 @@ export function createGradesPage({ api, session, onUnauthorized }) {
         ),
       ),
     );
-    status.set(`${items.length} grade${items.length === 1 ? '' : 's'}.`, 'info');
+    status.set(`Roll number ${studentRollNo} · ${items.length} grade${items.length === 1 ? '' : 's'}.`, 'info');
   }
 
   function showError(error) {
     mount(tableBody);
-    subtitle.textContent = '';
     if (error && error.status === 401 && onUnauthorized) {
       onUnauthorized();
       return;
