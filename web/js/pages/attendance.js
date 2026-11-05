@@ -33,7 +33,6 @@ export function createAttendancePage({ api, session, onUnauthorized }) {
   const status = statusBar();
   const tableBody = el('tbody');
   const tableFoot = el('tfoot');
-  const subtitle = el('p', { class: 'muted small' });
 
   const lookup = createRecordLookup({ api, session, onLookup: load, onError: showError });
 
@@ -80,7 +79,6 @@ export function createAttendancePage({ api, session, onUnauthorized }) {
     ),
     lookup.node,
     status.node,
-    subtitle,
     el('div', { class: 'table-wrap' }, table),
   );
 
@@ -92,7 +90,6 @@ export function createAttendancePage({ api, session, onUnauthorized }) {
     const mine = ++generation;
     lookup.setBusy(true);
     status.set('Loading…', 'info');
-    subtitle.textContent = '';
     try {
       const result = await api.getAttendance(rollNo, { semester });
       if (mine !== generation) return;
@@ -122,11 +119,11 @@ export function createAttendancePage({ api, session, onUnauthorized }) {
   }
 
   function render({ studentRollNo, items, overall }) {
-    subtitle.textContent = `Roll number ${studentRollNo}`;
+    const who = `Roll number ${studentRollNo}`;
     if (items.length === 0) {
       mount(tableBody, el('tr', {}, el('td', { class: 'empty', colSpan: 7 }, 'No attendance recorded.')));
       mount(tableFoot);
-      status.set('No attendance found.', 'info');
+      status.set(`${who} · no attendance found.`, 'info');
       return;
     }
     mount(
@@ -152,8 +149,8 @@ export function createAttendancePage({ api, session, onUnauthorized }) {
     const atRisk = items.filter((i) => typeof i.percentage === 'number' && i.percentage < RISK_THRESHOLD);
     status.set(
       atRisk.length
-        ? `${atRisk.length} course${atRisk.length === 1 ? '' : 's'} below ${RISK_THRESHOLD}%.`
-        : `${items.length} course${items.length === 1 ? '' : 's'}.`,
+        ? `${who} · ${atRisk.length} course${atRisk.length === 1 ? '' : 's'} below ${RISK_THRESHOLD}%.`
+        : `${who} · ${items.length} course${items.length === 1 ? '' : 's'}.`,
       atRisk.length ? 'error' : 'info',
     );
   }
@@ -161,7 +158,6 @@ export function createAttendancePage({ api, session, onUnauthorized }) {
   function showError(error) {
     mount(tableBody);
     mount(tableFoot);
-    subtitle.textContent = '';
     if (error && error.status === 401 && onUnauthorized) {
       onUnauthorized();
       return;
