@@ -93,6 +93,52 @@ describe('ApiClient.getGrades', () => {
   });
 });
 
+describe('ApiClient.upsertGrade', () => {
+  test('posts the grade fields to the write endpoint with bearer auth', async () => {
+    const s = stub({
+      status: 201,
+      body: { studentRollNo: '1ABC26CS001', courseCode: 'CS501', grade: 8.5, created: true },
+    });
+    const result = await s.client().upsertGrade({
+      studentRollNo: '1ABC26CS001', courseCode: 'CS501', grade: 8.5,
+    });
+    assert.equal(s.calls[0].method, 'POST');
+    assert.equal(s.calls[0].url, '/api/grades');
+    assert.equal(s.calls[0].headers.Authorization, 'Bearer tok');
+    assert.deepEqual(JSON.parse(s.calls[0].body), {
+      studentRollNo: '1ABC26CS001', courseCode: 'CS501', grade: 8.5,
+    });
+    assert.equal(result.created, true);
+  });
+
+  test('accepts 200 for an update', async () => {
+    const s = stub({ status: 200, body: { created: false, grade: 9.0 } });
+    const result = await s.client().upsertGrade({
+      studentRollNo: '1ABC26CS001', courseCode: 'CS501', grade: 9.0,
+    });
+    assert.equal(result.created, false);
+  });
+
+  test('403 explains that the teacher cannot enter this subject', async () => {
+    const s = stub({ status: 403, body: { error: 'forbidden' } });
+    await assert.rejects(
+      s.client().upsertGrade({ studentRollNo: 'X', courseCode: 'CS502', grade: 8 }),
+      (error) => error.status === 403 && /assigned to teach/.test(error.message),
+    );
+  });
+
+  test('400 preserves field errors', async () => {
+    const s = stub({
+      status: 400,
+      body: { error: 'validation_failed', fields: { grade: 'must be between 0.0 and 10.0' } },
+    });
+    await assert.rejects(
+      s.client().upsertGrade({ studentRollNo: 'X', courseCode: 'CS501', grade: 11 }),
+      (error) => error.status === 400 && error.fields.grade.includes('10.0'),
+    );
+  });
+});
+
 // -- demo mode mirrors the server's scoping --------------------------------------
 
 describe('MockApiClient grade scoping', () => {
@@ -120,6 +166,55 @@ describe('MockApiClient grade scoping', () => {
     const api = await as('admin', 'admin123');
     const { items } = await api.getGrades('PES2UG23CS101');
     assert.equal(items.length, 4);
+  });
+
+  test('a teacher can update a grade for an assigned subject', async () => {
+    const api = await as('teacher', 'teacher123');
+    const result = await api.upsertGrade({
+      studentRollNo: 'PES2UG23CS101', courseCode: 'CS501', grade: 8.2,
+    });
+    assert.equal(result.created, false);
+    const { items } = await api.getGrades('PES2UG23CS101');
+    assert.equal(items.find((item) => item.courseCode === 'CS501').grade, 8.2);
+  });
+
+  test('a teacher cannot enter a grade for an unassigned subject', async () => {
+    const api = await as('teacher', 'teacher123');
+    await assert.rejects(
+      api.upsertGrade({ studentRollNo: 'PES2UG23CS101', courseCode: 'CS502', grade: 8 }),
+      (error) => error.status === 403,
+    );
+  });
+
+  test('admin and student accounts cannot enter grades', async () => {
+    const admin = await as('admin', 'admin123');
+    const student = await as('student', 'student123');
+    for (const api of [admin, student]) {
+      await assert.rejects(
+        api.upsertGrade({ studentRollNo: 'PES2UG23CS101', courseCode: 'CS501', grade: 8 }),
+        (error) => error.status === 403,
+      );
+    }
+  });
+
+  test('the inclusive grade range boundaries are accepted', async () => {
+    const api = await as('teacher', 'teacher123');
+    for (const grade of [0, 10]) {
+      const result = await api.upsertGrade({
+        studentRollNo: 'PES2UG23CS101', courseCode: 'CS501', grade,
+      });
+      assert.equal(result.grade, grade);
+    }
+  });
+
+  test('grade values outside the contract range or precision are rejected', async () => {
+    const api = await as('teacher', 'teacher123');
+    for (const grade of [10.1, 8.55]) {
+      await assert.rejects(
+        api.upsertGrade({ studentRollNo: 'PES2UG23CS101', courseCode: 'CS501', grade }),
+        (error) => error.status === 400,
+      );
+    }
   });
 });
 
@@ -174,6 +269,36 @@ describe('ApiClient.getAttendance', () => {
   });
 });
 
+describe('ApiClient attendance writes (SRS-24)', () => {
+  const entry = { rollNo: '1ABC26CS001', courseCode: 'CS501', sessionDate: '2026-11-05', status: 'present' };
+
+  test('creates a session with POST', async () => {
+    const s = stub({ status: 201, body: entry });
+    await s.client().createAttendance(entry);
+    assert.equal(s.calls[0].method, 'POST');
+    assert.equal(s.calls[0].url, '/api/attendance');
+    assert.deepEqual(JSON.parse(s.calls[0].body), entry);
+  });
+
+  test('updates an existing session with PUT', async () => {
+    const s = stub({ status: 200, body: entry });
+    await s.client().updateAttendance(entry);
+    assert.equal(s.calls[0].method, 'PUT');
+    assert.equal(s.calls[0].url, '/api/attendance/1ABC26CS001/CS501/2026-11-05');
+    assert.deepEqual(JSON.parse(s.calls[0].body), { status: 'present' });
+  });
+
+  test('duplicate creation is a conflict', async () => {
+    const s = stub({ status: 409, body: { error: 'conflict' } });
+    await assert.rejects(s.client().createAttendance(entry), /already exists/);
+  });
+
+  test('update requires an existing session', async () => {
+    const s = stub({ status: 404, body: { error: 'not_found' } });
+    await assert.rejects(s.client().updateAttendance(entry), /No attendance entry exists/);
+  });
+});
+
 describe('attendance percentage formatting', () => {
   test('two decimals, and a dash for no sessions', async () => {
     // Imported lazily: the page module touches `document` only when a page is built.
@@ -201,6 +326,22 @@ describe('MockApiClient attendance', () => {
     const student = new MockApiClient({ latency: 0 });
     await student.login('student', 'student123');
     await assert.rejects(student.getAttendance('PES2UG23CS101'), (e) => e.status === 403);
+  });
+
+  test('teacher can record, update, and cannot duplicate a session', async () => {
+    const api = new MockApiClient({ latency: 0 });
+    await api.login('teacher', 'teacher123');
+    const entry = { rollNo: 'PES2UG23CS105', courseCode: 'CS501', sessionDate: '2026-11-05', status: 'present' };
+    await api.createAttendance(entry);
+    await assert.rejects(api.createAttendance(entry), (e) => e.status === 409);
+    await api.updateAttendance({ ...entry, status: 'absent' });
+    assert.equal(api.attendanceSessions.get('PES2UG23CS105|CS501|2026-11-05'), 'absent');
+  });
+
+  test('teacher cannot write attendance for an unassigned course', async () => {
+    const api = new MockApiClient({ latency: 0 });
+    await api.login('teacher', 'teacher123');
+    await assert.rejects(api.createAttendance({ rollNo: 'PES2UG23CS105', courseCode: 'CS502', sessionDate: '2026-11-05', status: 'present' }), (e) => e.status === 403);
   });
 
   test('every role may open Attendance', () => {

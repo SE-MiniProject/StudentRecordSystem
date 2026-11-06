@@ -81,6 +81,18 @@ protected:
         ServerFixture::SetUp();
     }
 
+    httplib::Result PostAs(const std::string& path, const std::string& token, const std::string& body) {
+        httplib::Headers headers;
+        if (!token.empty()) headers.emplace("Authorization", "Bearer " + token);
+        return httplib::Client(base_url()).Post(path, headers, body, "application/json");
+    }
+
+    httplib::Result PutAs(const std::string& path, const std::string& token, const std::string& body) {
+        httplib::Headers headers;
+        if (!token.empty()) headers.emplace("Authorization", "Bearer " + token);
+        return httplib::Client(base_url()).Put(path, headers, body, "application/json");
+    }
+
     httplib::Result GetAs(const std::string& path, const std::string& token) {
         httplib::Headers headers;
         if (!token.empty()) headers.emplace("Authorization", "Bearer " + token);

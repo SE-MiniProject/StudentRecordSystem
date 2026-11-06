@@ -10,6 +10,7 @@ class GradeStore;
 class SessionStore;
 class StudentStore;
 
+// POST /api/grades — SRS-F-012/F-013, AC-012/AC-013 (Teacher only).
 // GET /api/grades/{rollNo} — SRS-F-014, AC-014 / TC-014.
 //
 //   Admin    every grade of any student

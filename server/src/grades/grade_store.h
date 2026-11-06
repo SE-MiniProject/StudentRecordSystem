@@ -21,13 +21,27 @@ struct GradeQuery {
     std::string roll_no;
     int semester = 0;              // 0 = all semesters (F-023)
     // Non-empty for a Teacher: only grades in subjects this username is
-    // assigned to in teacher_subjects are returned ("Teacher sees own
-    // subjects"). Empty for Admin and the owning Student: no subject filter.
+    // assigned to in teacher_subjects are returned ("Teacher sees own subjects").
     std::string teacher_username;
 };
 
-// Storage behind the grade read route. BE lane owns this interface; DB lane owns
-// the query behind it.
+struct GradeWrite {
+    std::string roll_no;
+    std::string subject_code;
+    std::string teacher_username;  // resolved from the authenticated session
+    double grade = 0.0;
+};
+
+enum class GradeWriteResult {
+    kCreated,
+    kUpdated,
+    kStudentNotFound,
+    kTeacherNotAssigned,
+    kError,
+};
+
+// Storage behind the grade routes. BE lane owns this interface; DB lane owns
+// the queries behind it.
 class GradeStore {
 public:
     virtual ~GradeStore() = default;
@@ -35,6 +49,11 @@ public:
     // Grades for one student, filtered by `query`. nullopt only on a storage
     // failure; a student with no visible grades is an empty vector.
     virtual std::optional<std::vector<GradeItem>> ForStudent(const GradeQuery& query) = 0;
+
+    // Insert a grade or replace the existing value for (student, subject).
+    // The implementation verifies both student existence and teacher
+    // assignment as part of the write operation.
+    virtual GradeWriteResult Upsert(const GradeWrite& grade) = 0;
 };
 
 GradeStore& DefaultGradeStore();

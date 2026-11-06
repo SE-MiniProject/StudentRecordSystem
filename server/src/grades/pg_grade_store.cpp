@@ -36,6 +36,25 @@ constexpr const char* kGradesSql =
     "        WHERE ts.subject_code = g.subject_code AND ts.username = $3)) "
     "ORDER BY COALESCE(s.semester, 0), g.subject_code";
 
+// One statement checks both prerequisites and performs the upsert. This avoids
+// trusting a teacher name from the request and prevents an unassigned teacher
+// from writing a grade through a direct API call.
+constexpr const char* kUpsertGradeSql =
+    "WITH eligibility AS ("
+    "  SELECT EXISTS (SELECT 1 FROM students WHERE roll_no = $1) AS student_exists, "
+    "         EXISTS (SELECT 1 FROM teacher_subjects "
+    "                 WHERE username = $2 AND subject_code = $3) AS teacher_assigned"
+    "), written AS ("
+    "  INSERT INTO grades (roll_no, subject_code, score, updated_at) "
+    "  SELECT $1, $3, $4, now() FROM eligibility "
+    "  WHERE student_exists AND teacher_assigned "
+    "  ON CONFLICT (roll_no, subject_code) DO UPDATE "
+    "    SET score = EXCLUDED.score, updated_at = now() "
+    "  RETURNING (xmax = 0) AS created"
+    ") "
+    "SELECT eligibility.student_exists, eligibility.teacher_assigned, written.created "
+    "FROM eligibility LEFT JOIN written ON TRUE";
+
 class PgGradeStore final : public GradeStore {
 public:
     explicit PgGradeStore(std::string db_url) : db_url_(std::move(db_url)) {}
@@ -63,6 +82,30 @@ public:
         }
     }
 
+    GradeWriteResult Upsert(const GradeWrite& grade) override {
+        try {
+            pqxx::connection conn(db_url_);
+            pqxx::work tx(conn);
+            const auto rows = tx.exec(
+                kUpsertGradeSql,
+                pqxx::params{grade.roll_no, grade.teacher_username, grade.subject_code, grade.grade});
+            if (rows.empty()) return GradeWriteResult::kError;
+            if (!rows[0]["student_exists"].as<bool>()) {
+                tx.commit();
+                return GradeWriteResult::kStudentNotFound;
+            }
+            if (!rows[0]["teacher_assigned"].as<bool>()) {
+                tx.commit();
+                return GradeWriteResult::kTeacherNotAssigned;
+            }
+            const bool created = rows[0]["created"].as<bool>();
+            tx.commit();
+            return created ? GradeWriteResult::kCreated : GradeWriteResult::kUpdated;
+        } catch (const pqxx::failure&) {
+            return GradeWriteResult::kError;
+        }
+    }
+
 private:
     std::string db_url_;
 };
@@ -72,6 +115,7 @@ public:
     std::optional<std::vector<GradeItem>> ForStudent(const GradeQuery&) override {
         return std::nullopt;
     }
+    GradeWriteResult Upsert(const GradeWrite&) override { return GradeWriteResult::kError; }
 };
 
 }  // namespace
