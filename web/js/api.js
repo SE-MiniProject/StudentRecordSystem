@@ -835,6 +835,7 @@ export class MockApiClient {
     if (row && previous !== entry.status) row.present += entry.status === 'present' ? 1 : -1;
     this.attendanceSessions.set(key, entry.status);
     return { ...entry };
+  }
   async createTimetableSlot(slot) {
     await this.wait();
     if (!this.current || this.current.role !== 'admin') {
