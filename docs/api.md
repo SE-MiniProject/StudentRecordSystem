@@ -143,7 +143,7 @@ Response `204`. Dependent grades and attendance are cascade-deleted (F-011). Har
 | `studentRollNo` | string | |
 | `courseCode` | string | |
 | `courseName` | string | response only |
-| `grade` | number | 0.0–10.0 inclusive |
+| `grade` | number | 0.0–10.0 inclusive, in 0.1 increments |
 | `semester` | integer | |
 | `updatedAt` | string | server-set on create and update (AC-013) |
 
@@ -172,13 +172,13 @@ Role scoping (SRS-F-014, AC-014), enforced by the server:
 
 `courseName` and `semester` come from `subjects`; a grade whose code has no `subjects` row is returned with `courseName` equal to the code and `semester: 0`, and is visible to no teacher. `semester` outside 1–12 or non-numeric returns `400` with `fields.semester`.
 
-### `POST /api/grades` (Admin, Teacher)
+### `POST /api/grades` (Teacher)
 
-Body: `studentRollNo`, `courseCode`, `grade`, `semester`.
+Body: `studentRollNo`, `courseCode`, `grade`. The authenticated teacher identity is resolved from the bearer session; a username supplied by the client is never accepted as authority. The subject's semester is resolved from `subjects`.
 
-Upserts on `(studentRollNo, courseCode, semester)`. Returns `201` when created, `200` when updated.
+Upserts on `(studentRollNo, courseCode)`, matching the database uniqueness constraint. Returns `201` when created, `200` when updated. `updatedAt` is set by the server on both paths.
 
-`grade` outside 0.0–10.0 returns `400` with `fields.grade`. Teacher not assigned to the course returns `403`. Unknown student returns `404`.
+`grade` outside 0.0–10.0 or not representable at one decimal place returns `400` with `fields.grade`. A teacher not assigned to the subject returns `403`. An unknown student returns `404`. Admin and Student accounts cannot enter grades; this follows SRS-F-012 / AC-012, even though older architecture notes describe the write route as Admin-or-Teacher.
 
 No delete endpoint.
 

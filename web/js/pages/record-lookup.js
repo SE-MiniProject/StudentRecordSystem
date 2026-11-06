@@ -71,6 +71,13 @@ export function createRecordLookup({ api, session, onLookup, onError }) {
   return {
     node,
     current: () => last,
+    /** Select a record target from another page action (e.g. after grade entry). */
+    setTarget(target) {
+      last = { rollNo: target.rollNo, semester: Number(target.semester) || 0 };
+      if (rollInput) rollInput.value = last.rollNo;
+      semesterSelect.value = String(last.semester);
+      return last;
+    },
     /** Students: resolve the linked roll number and load it straight away. */
     async start() {
       if (!isStudent) {
