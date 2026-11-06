@@ -360,10 +360,21 @@ await waitFor("document.querySelector('.shell') !== null", 'teacher shell');
 check(await evalJs("(() => { const n = [...document.querySelectorAll('.nav-item')].map(b=>b.textContent); return n[0] === 'Students' && !n.includes('Accounts'); })()"), 'teacher sees Students but not Accounts');
 check(await evalJs("![...document.querySelectorAll('button')].some(b=>/Add student/.test(b.textContent))"), 'teacher cannot see Add student');
 
-// --- Sprint 2: grades are role-scoped (SRS-F-014) ---------------------------
-// Teacher looks up a student and sees only their own two subjects.
+// --- Sprint 2: grade entry and role-scoped reads (SRS-23 / SRS-F-014) -----
+// Teacher can update a grade for an assigned subject; the page refreshes the
+// selected student's rows after the write.
 await evalJs("[...document.querySelectorAll('.nav-item')].find(b=>b.textContent === 'Grades').click()");
 await waitFor("document.getElementById('grades-table') !== null", 'grades page');
+await evalJs(`(() => {
+  const form = document.querySelector('.grade-entry-form');
+  form.querySelector('#grade-entry-roll').value = 'PES2UG23CS101';
+  form.querySelector('#grade-entry-course').value = 'CS501';
+  form.querySelector('#grade-entry-value').value = '8.2';
+  form.requestSubmit();
+})()`);
+await waitFor("[...document.querySelectorAll('#grades-table tbody tr')].some(row => row.cells[0]?.textContent === 'CS501' && row.cells[3]?.textContent === '8.2')", 'saved grade appears');
+check(true, 'teacher can update a grade for an assigned subject');
+// Teacher looks up a student and sees only their own two subjects.
 await evalJs(`(() => {
   const input = document.querySelector('.page input[type=search]');
   input.value = 'PES2UG23CS101';

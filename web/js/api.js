@@ -367,6 +367,31 @@ export class ApiClient {
     throw recordError(status, body, 'grades');
   }
 
+  /** POST /api/grades — Teacher only; creates or replaces one student's grade. */
+  async upsertGrade({ studentRollNo, courseCode, grade }, { signal } = {}) {
+    const { status, body } = await this.request('POST', '/api/grades', {
+      body: { studentRollNo, courseCode, grade },
+      signal,
+    });
+    if (status === 200 || status === 201) return body || {};
+    const env = errorEnvelope(body);
+    if (status === 401) throw new ApiError(SESSION_EXPIRED, { status, ...env });
+    if (status === 403) {
+      throw new ApiError('You are not assigned to teach this subject or cannot enter grades.', {
+        status,
+        ...env,
+      });
+    }
+    if (status === 404) throw new ApiError('No student with that roll number.', { status, ...env });
+    if (status === 400) {
+      throw new ApiError('Grade must be a number from 0.0 to 10.0. Check the required fields.', {
+        status,
+        ...env,
+      });
+    }
+    throw new ApiError(ApiClient.unexpected(status, body), { status, ...env });
+  }
+
   // -- Attendance (SRS-F-017, F-018) --------------------------------------
 
   /**
@@ -722,10 +747,41 @@ export class MockApiClient {
         courseName: this.subjects[g.courseCode].name,
         grade: Math.round(g.grade * 10) / 10,
         semester: this.subjects[g.courseCode].semester,
-        updatedAt: '2026-11-01T09:00:00Z',
+        updatedAt: g.updatedAt || '2026-11-01T09:00:00Z',
       }))
       .filter((g) => !semester || g.semester === semester);
     return { studentRollNo: rollNo, items };
+  }
+
+  async upsertGrade({ studentRollNo, courseCode, grade }) {
+    await this.wait();
+    const who = this.current || { role: 'student', username: '' };
+    if (who.role !== 'teacher') {
+      throw new ApiError('You cannot enter grades with this account.', { status: 403 });
+    }
+    if (!this.students.some((student) => student.rollNo === studentRollNo)) {
+      throw new ApiError('No student with that roll number.', { status: 404 });
+    }
+    if (!(this.teaches[who.username] || []).includes(courseCode)) {
+      throw new ApiError('You are not assigned to teach this subject.', { status: 403 });
+    }
+    if (typeof grade !== 'number' || !Number.isFinite(grade) || grade < 0 || grade > 10 || Math.abs(grade * 10 - Math.round(grade * 10)) > 1e-9) {
+      throw new ApiError('Grade must be between 0.0 and 10.0 in 0.1 increments.', {
+        status: 400,
+        fields: { grade: 'must be between 0.0 and 10.0 in 0.1 increments' },
+      });
+    }
+    const existing = this.grades.find(
+      (item) => item.rollNo === studentRollNo && item.courseCode === courseCode,
+    );
+    const now = new Date().toISOString();
+    if (existing) {
+      existing.grade = grade;
+      existing.updatedAt = now;
+      return { studentRollNo, courseCode, grade, created: false };
+    }
+    this.grades.push({ rollNo: studentRollNo, courseCode, grade, updatedAt: now });
+    return { studentRollNo, courseCode, grade, created: true };
   }
 
   async getAttendance(rollNo, { semester = 0, courseCode = '' } = {}) {
