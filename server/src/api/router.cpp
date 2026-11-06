@@ -1,5 +1,7 @@
 #include "api/router.h"
 
+#include <cstdlib>
+#include <iostream>
 #include <string>
 
 #include "accounts/account_routes.h"
@@ -111,11 +113,26 @@ void RegisterRoutes(httplib::Server& server) {
 }
 
 int RunServer(int port, const std::string& bind) {
-    httplib::Server server;
+    // Never fall back to plaintext HTTP. A deployment must provide its TLS
+    // certificate and private key explicitly; missing or invalid credentials
+    // fail closed before the listener is opened.
+    const char* cert_path = std::getenv("SRS_TLS_CERT_FILE");
+    const char* key_path = std::getenv("SRS_TLS_KEY_FILE");
+    if (cert_path == nullptr || *cert_path == '\0' || key_path == nullptr || *key_path == '\0') {
+        std::cerr << "TLS is required: set SRS_TLS_CERT_FILE and SRS_TLS_KEY_FILE\n";
+        return 1;
+    }
+
+    httplib::SSLServer server(cert_path, key_path);
+    if (!server.is_valid()) {
+        std::cerr << "TLS initialization failed; verify certificate and private key files\n";
+        return 1;
+    }
 
     RegisterRoutes(server);
 
     if (!server.listen(bind.c_str(), port)) {
+        std::cerr << "TLS listener failed to start\n";
         return 1;
     }
     return 0;

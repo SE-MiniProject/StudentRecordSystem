@@ -116,6 +116,8 @@ add_library(
     src/timetable/timetable_routes.cpp
 )
 
+target_compile_definitions(srs_core PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
+
 target_include_directories(
     srs_core
     PUBLIC
@@ -129,6 +131,7 @@ target_link_libraries(
     srs_options
     srs_deps
     OpenSSL::Crypto
+    OpenSSL::SSL
     pqxx
 )
 

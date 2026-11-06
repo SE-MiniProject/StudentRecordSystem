@@ -40,6 +40,9 @@ jobs:
       PGPASSWORD: postgres
       PGDATABASE: srs_ci
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/srs_ci
+      SRS_TLS_CERT_FILE: /tmp/srs-ci-cert.pem
+      SRS_TLS_KEY_FILE: /tmp/srs-ci-key.pem
+      CURL_CA_BUNDLE: /tmp/srs-ci-cert.pem
 
     steps:
       - uses: actions/checkout@v4
@@ -99,15 +102,34 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      - name: Create ephemeral TLS certificate for CI
+        run: |
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout "$SRS_TLS_KEY_FILE" -out "$SRS_TLS_CERT_FILE" \
+            -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1'
+
       - name: Smoke test
         run: |
+          if env -u SRS_TLS_CERT_FILE -u SRS_TLS_KEY_FILE PORT=8087 ./build/srs_server >/tmp/srs-no-tls.log 2>&1; then
+            echo "server started without TLS credentials"
+            exit 1
+          fi
           PORT=8088 ./build/srs_server &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          ready=false
           for i in $(seq 1 50); do
-            curl -fsS http://127.0.0.1:8088/health && exit 0
+            if curl -fsS --tlsv1.2 --tls-max 1.2 https://127.0.0.1:8088/health >/dev/null; then
+              ready=true
+              break
+            fi
             sleep 0.2
           done
-          echo "server did not answer /health"
-          exit 1
+          [ "$ready" = true ] || { echo "server did not answer HTTPS /health"; exit 1; }
+          if curl -fsS http://127.0.0.1:8088/health >/dev/null 2>&1; then
+            echo "plaintext HTTP unexpectedly reached the TLS listener"
+            exit 1
+          fi
 
       # End-to-end against a real database. The unit tests use fake stores, so
       # they cannot catch a bad seed digest, a migration that does not apply, or
@@ -115,15 +137,15 @@ jobs:
       # below failed at least once locally before the code was fixed.
       - name: End-to-end API against seeded database
         run: |
-          PORT=8089 ./build/srs_server &
+          PORT=8089 ./build/srs_server >/tmp/srs-e2e-server.log 2>&1 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
           for i in $(seq 1 50); do
-            curl -fsS http://127.0.0.1:8089/health >/dev/null && break
+            curl -fsS https://127.0.0.1:8089/health >/dev/null && break
             sleep 0.2
           done
 
-          base=http://127.0.0.1:8089
+          base=https://127.0.0.1:8089
 
           login() {
             curl -fsS -X POST "$base/api/auth/login" \
@@ -140,7 +162,6 @@ jobs:
           response=$(curl -fsS -X POST "$base/api/auth/login" \
             -H 'Content-Type: application/json' \
             -d '{"username":"admin","password":"admin"}')
-          echo "login response: $response"
           printf '%s' "$response" | python3 -c '
           import json, sys
           body = json.load(sys.stdin)
@@ -374,3 +395,10 @@ jobs:
           after=$(status_of "$base/api/students" -H "Authorization: Bearer $admin")
           echo "token after logout: $after"
           [ "$after" = "401" ] || { echo "logged-out token still works, got $after"; exit 1; }
+          # Request credentials and bearer tokens must never appear in server logs.
+          if grep -F -e 'admin' -e 'teacher' -e 'student' -e 'admin-password' \
+              -e "$admin" -e "$teacher" -e "$student" -e "$teacher2" -e "$ci_token" \
+              /tmp/srs-e2e-server.log; then
+            echo "credential or token leaked into server logs"
+            exit 1
+          fi
