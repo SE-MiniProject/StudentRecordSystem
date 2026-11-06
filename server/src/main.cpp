@@ -50,7 +50,7 @@ std::string BindFromEnv() {
 int main() {
     const std::string bind = BindFromEnv();
     const int port = PortFromEnv();
-    std::cout << "srs_server listening on " << (bind.empty() ? "*" : bind) << ':' << port
+    std::cout << "srs_server listening with TLS on " << (bind.empty() ? "*" : bind) << ':' << port
               << '\n'
               << std::flush;
     return srs::RunServer(port, bind);

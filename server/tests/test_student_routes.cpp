@@ -445,6 +445,43 @@ TEST_F(StudentRoutesFixture, DeleteOfMissingStudentIs404) {
 
 // --- RBAC: the forged-request clause ---------------------------------------
 
+TEST_F(StudentRoutesFixture, EveryRecordMutationRejectsMissingAuthenticationBeforeStorage) {
+    httplib::Client client(base_url());
+    const std::string student_body =
+        R"({"rollNo":"1PE22CS010","fullName":"No Auth","department":"CSE",)"
+        R"("semester":3,"dateOfBirth":"2004-05-06","contact":"7777777777"})";
+    const std::string account_body =
+        R"({"username":"noauth","password":"secret123","fullName":"No Auth",)"
+        R"("role":"teacher"})";
+
+    const auto create_student = client.Post("/api/students", student_body, "application/json");
+    const auto update_student = client.Put("/api/students/1PE21CS001", R"({"semester":6})",
+                                           "application/json");
+    const auto delete_student = client.Delete("/api/students/1PE21CS001");
+    const auto create_account = client.Post("/api/accounts", account_body, "application/json");
+    const auto update_account = client.Patch("/api/accounts/admin", R"({"active":false})",
+                                             "application/json");
+
+    ASSERT_TRUE(create_student);
+    ASSERT_TRUE(update_student);
+    ASSERT_TRUE(delete_student);
+    ASSERT_TRUE(create_account);
+    ASSERT_TRUE(update_account);
+    EXPECT_EQ(create_student->status, 401);
+    EXPECT_EQ(update_student->status, 401);
+    EXPECT_EQ(delete_student->status, 401);
+    EXPECT_EQ(create_account->status, 401);
+    EXPECT_EQ(update_account->status, 401);
+
+    // A rejected request must stop before the store layer, not merely return
+    // 401 after a write has already happened.
+    EXPECT_EQ(students->by_roll.count("1PE22CS010"), 0u);
+    ASSERT_EQ(students->by_roll.count("1PE21CS001"), 1u);
+    EXPECT_EQ(students->by_roll.at("1PE21CS001").semester, 5);
+    EXPECT_EQ(accounts->by_name.count("noauth"), 0u);
+    EXPECT_TRUE(accounts->accounts.empty());
+}
+
 TEST_F(StudentRoutesFixture, ForgedAndAbsentTokensAreRejected) {
     httplib::Client client(base_url());
     EXPECT_EQ(client.Get("/api/students")->status, 401);
