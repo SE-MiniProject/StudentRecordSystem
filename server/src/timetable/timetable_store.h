@@ -21,6 +21,13 @@ struct TimetableSlot {
     std::string room;
 };
 
+enum class CreateTimetableResult {
+    kCreated,
+    kConflict,
+    kInvalidAssignment,
+    kError,
+};
+
 // What one timetable read is scoped to. Built by the route from the
 // server-resolved caller; every non-empty field is an AND filter.
 struct TimetableQuery {
@@ -37,6 +44,10 @@ public:
     // Slots matching `query`, ordered by weekday then start time. nullopt only
     // on a storage failure.
     virtual std::optional<std::vector<TimetableSlot>> List(const TimetableQuery& query) = 0;
+
+    // Inserts one slot only when its teacher and room are free for the same
+    // weekday/semester interval. The created row is returned for the API body.
+    virtual CreateTimetableResult Create(const TimetableSlot& slot, TimetableSlot* created) = 0;
 };
 
 TimetableStore& DefaultTimetableStore();

@@ -64,6 +64,7 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f db/migrations/002_students.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/003_subjects_teaching.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/004_timetable.sql
+          psql -v ON_ERROR_STOP=1 -f db/migrations/005_timetable_conflicts.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_data.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_records.sql
 
@@ -79,6 +80,7 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f db/migrations/002_students.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/003_subjects_teaching.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/004_timetable.sql
+          psql -v ON_ERROR_STOP=1 -f db/migrations/005_timetable_conflicts.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_data.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_records.sql
           after=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance)||','||(SELECT count(*) FROM subjects)||','||(SELECT count(*) FROM teacher_subjects)||','||(SELECT count(*) FROM timetable);")
@@ -308,6 +310,28 @@ jobs:
           echo "cross-user: teacher->teacher2=$t_cross student->sem3=$t_class student->other roll=$t_roll own roll=$t_own"
           [ "$t_cross" = "403" ] && [ "$t_class" = "403" ] && [ "$t_roll" = "403" ] && [ "$t_own" = "200" ] \
             || { echo "cross-user timetable fetch was not rejected"; exit 1; }
+
+          # --- SRS-F-019/F-021 create slots and reject interval overlaps ---
+          created_slot=$(status_of -X POST "$base/api/timetable" \
+            -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
+            -d '{"dayOfWeek":5,"startTime":"15:00","endTime":"16:00","courseCode":"CS501","teacher":"teacher","department":"Computer Science","semester":5,"room":"CI-ROOM-1"}')
+          echo "create timetable slot: $created_slot"
+          [ "$created_slot" = "201" ] || { echo "expected 201 from timetable create, got $created_slot"; exit 1; }
+
+          teacher_overlap=$(status_of -X POST "$base/api/timetable" \
+            -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
+            -d '{"dayOfWeek":5,"startTime":"15:30","endTime":"16:30","courseCode":"CS503","teacher":"teacher","department":"Computer Science","semester":5,"room":"CI-ROOM-2"}')
+          room_overlap=$(status_of -X POST "$base/api/timetable" \
+            -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
+            -d '{"dayOfWeek":5,"startTime":"15:30","endTime":"16:30","courseCode":"CS502","teacher":"teacher2","department":"Computer Science","semester":5,"room":"CI-ROOM-1"}')
+          teacher_create=$(status_of -X POST "$base/api/timetable" \
+            -H "Authorization: Bearer $teacher" -H 'Content-Type: application/json' \
+            -d '{"dayOfWeek":5,"startTime":"17:00","endTime":"18:00","courseCode":"CS501","teacher":"teacher","department":"Computer Science","semester":5,"room":"CI-ROOM-3"}')
+          echo "timetable teacher overlap=$teacher_overlap room overlap=$room_overlap teacher create=$teacher_create"
+          [ "$teacher_overlap" = "409" ] && [ "$room_overlap" = "409" ] && [ "$teacher_create" = "403" ] \
+            || { echo "timetable conflict or role enforcement failed"; exit 1; }
+          after_conflicts=$(slots "" "$admin")
+          [ "${after_conflicts%% *}" = "9" ] || { echo "conflicting timetable requests changed existing slots: $after_conflicts"; exit 1; }
 
           # --- SRS-19 create account, SRS-17 patch account ---
           account=$(status_of -X POST "$base/api/accounts" \

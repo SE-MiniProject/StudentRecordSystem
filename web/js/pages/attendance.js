@@ -33,6 +33,7 @@ export function createAttendancePage({ api, session, onUnauthorized }) {
   const status = statusBar();
   const tableBody = el('tbody');
   const tableFoot = el('tfoot');
+  const canRecord = session.role === Role.Teacher;
 
   const lookup = createRecordLookup({ api, session, onLookup: load, onError: showError });
 
@@ -64,6 +65,40 @@ export function createAttendancePage({ api, session, onUnauthorized }) {
     [Role.Student]: 'Your own attendance.',
   }[session.role];
 
+  let entryForm = null;
+  if (canRecord) {
+    const roll = el('input', { type: 'text', name: 'rollNo', placeholder: 'Student roll number', required: true, maxlength: 32 });
+    const course = el('input', { type: 'text', name: 'courseCode', placeholder: 'Course code', required: true, maxlength: 32 });
+    const date = el('input', { type: 'date', name: 'sessionDate', required: true, max: new Date().toLocaleDateString('en-CA') });
+    const attendanceStatus = el('select', { name: 'status', required: true },
+      el('option', { value: 'present' }, 'Present'),
+      el('option', { value: 'absent' }, 'Absent'));
+    const operation = el('select', { name: 'operation', required: true },
+      el('option', { value: 'create' }, 'Record new session'),
+      el('option', { value: 'update' }, 'Update existing session'));
+    const submitEntry = el('button', { type: 'submit', class: 'primary' }, 'Save attendance');
+    entryForm = el('form', { class: 'toolbar attendance-entry', onsubmit: async (event) => {
+      event.preventDefault();
+      const entry = { rollNo: roll.value.trim(), courseCode: course.value.trim(), sessionDate: date.value, status: attendanceStatus.value };
+      if (!entry.rollNo || !entry.courseCode || !entry.sessionDate) return;
+      submitEntry.disabled = true;
+      status.set('Saving attendance…', 'info');
+      try {
+        if (operation.value === 'create') await api.createAttendance(entry);
+        else await api.updateAttendance(entry);
+        status.set('Attendance saved. Refreshing the attendance summary…', 'info');
+        if (lookup.current()?.rollNo === entry.rollNo) await load(lookup.current());
+        else status.set('Attendance saved. Enter the student roll number above to view the updated percentage.', 'info');
+      } catch (error) {
+        if (error && error.status === 401 && onUnauthorized) onUnauthorized();
+        else status.set((error && error.message) || 'Could not save attendance.', 'error');
+      } finally { submitEntry.disabled = false; }
+    } },
+      el('strong', {}, 'Record or update a class session'),
+      roll, course, date, attendanceStatus, operation, submitEntry,
+    );
+  }
+
   const root = el(
     'section',
     { class: 'page' },
@@ -78,6 +113,7 @@ export function createAttendancePage({ api, session, onUnauthorized }) {
       ),
     ),
     lookup.node,
+    entryForm,
     status.node,
     el('div', { class: 'table-wrap' }, table),
   );

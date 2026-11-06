@@ -414,6 +414,30 @@ export class ApiClient {
     throw recordError(status, body, 'attendance');
   }
 
+  /** POST /api/attendance — teacher records one student in a class session (SRS-24). */
+  async createAttendance(entry, { signal } = {}) {
+    const { status, body } = await this.request('POST', '/api/attendance', { body: entry, signal });
+    if (status === 201) return body;
+    if (status === 409) throw new ApiError('Attendance already exists for this student, course and date. Use Update instead.', { status, ...errorEnvelope(body) });
+    if (status === 403) throw new ApiError('You may record attendance only for courses assigned to you.', { status, ...errorEnvelope(body) });
+    if (status === 404) throw new ApiError('No student with that roll number.', { status, ...errorEnvelope(body) });
+    if (status === 400) throw new ApiError('Check the roll number, course, date and attendance status.', { status, ...errorEnvelope(body) });
+    if (status === 401) throw new ApiError(SESSION_EXPIRED, { status, ...errorEnvelope(body) });
+    throw new ApiError(ApiClient.unexpected(status, body), { status, ...errorEnvelope(body) });
+  }
+
+  /** PUT /api/attendance/{rollNo}/{courseCode}/{date} — update an existing session entry. */
+  async updateAttendance(entry, { signal } = {}) {
+    const path = `/api/attendance/${encodeURIComponent(entry.rollNo)}/${encodeURIComponent(entry.courseCode)}/${encodeURIComponent(entry.sessionDate)}`;
+    const { status, body } = await this.request('PUT', path, { body: { status: entry.status }, signal });
+    if (status === 200) return body;
+    if (status === 404) throw new ApiError('No attendance entry exists for that student, course and date.', { status, ...errorEnvelope(body) });
+    if (status === 403) throw new ApiError('You may update attendance only for courses assigned to you.', { status, ...errorEnvelope(body) });
+    if (status === 400) throw new ApiError('Check the attendance status and session date.', { status, ...errorEnvelope(body) });
+    if (status === 401) throw new ApiError(SESSION_EXPIRED, { status, ...errorEnvelope(body) });
+    throw new ApiError(ApiClient.unexpected(status, body), { status, ...errorEnvelope(body) });
+  }
+
   // -- Timetable (SRS-F-020) -----------------------------------------------
 
   /**
@@ -421,6 +445,30 @@ export class ApiClient {
    * Teacher own slots, Student own class, Admin all (filters optional, Admin
    * only). Asking for anyone else's schedule is a 403 from the server.
    */
+  /** POST /api/timetable — Admin creates a slot after server conflict checks. */
+  async createTimetableSlot(slot, { signal } = {}) {
+    const { status, body } = await this.request('POST', '/api/timetable', { body: slot, signal });
+    if (status === 201) return body;
+    if (status === 400) {
+      const env = errorEnvelope(body);
+      throw new ApiError(
+        env.code === 'invalid_assignment'
+          ? 'The teacher must be assigned to this course and its semester must match.'
+          : 'Please check the timetable slot fields.',
+        { status, ...env },
+      );
+    }
+    if (status === 403) {
+      throw new ApiError('Only administrators can create timetable slots.', { status, ...errorEnvelope(body) });
+    }
+    if (status === 409) {
+      throw new ApiError('The teacher or room is already booked during this time.', {
+        status, ...errorEnvelope(body),
+      });
+    }
+    throw new ApiError(ApiClient.unexpected(status, body), { status, ...errorEnvelope(body) });
+  }
+
   async getTimetable({ teacher = '', department = '', semester = 0, signal } = {}) {
     const query = new URLSearchParams();
     if (teacher) query.set('teacher', teacher);
@@ -518,9 +566,10 @@ export class MockApiClient {
       CS503: { name: 'Computer Networks', semester: 5 },
       CS301: { name: 'Data Structures', semester: 3 },
     };
-    this.teaches = { teacher: ['CS501', 'CS503'] };
+    this.teaches = { teacher: ['CS501', 'CS503'], teacher2: ['CS502', 'CS301'] };
     this.grades = MockApiClient.seedGrades(this.students);
     this.attendance = MockApiClient.seedAttendance(this.students);
+    this.attendanceSessions = new Map();
     this.teacherNames = { teacher: 'Demo Teacher', teacher2: 'Second Teacher' };
     const slot = (id, day, start, end, code, teacher, department, semester, room) => ({
       id, dayOfWeek: day, startTime: start, endTime: end, courseCode: code,
@@ -810,6 +859,67 @@ export class MockApiClient {
       },
       rollNo,
     );
+  }
+
+  async createAttendance(entry) {
+    await this.wait();
+    const who = this.current || { role: 'admin', username: 'admin' };
+    if (who.role !== 'teacher') throw new ApiError('Only teachers may record attendance.', { status: 403 });
+    if (!this.students.some((s) => s.rollNo === entry.rollNo)) throw new ApiError('No student with that roll number.', { status: 404 });
+    if (!(this.teaches[who.username] || []).includes(entry.courseCode)) throw new ApiError('You may record attendance only for courses assigned to you.', { status: 403 });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.sessionDate) || entry.sessionDate > new Date().toLocaleDateString('en-CA') || !['present', 'absent'].includes(entry.status)) {
+      throw new ApiError('Check the roll number, course, date and attendance status.', { status: 400 });
+    }
+    const key = `${entry.rollNo}|${entry.courseCode}|${entry.sessionDate}`;
+    if (this.attendanceSessions.has(key)) throw new ApiError('Attendance already exists for this student, course and date. Use Update instead.', { status: 409 });
+    this.attendanceSessions.set(key, entry.status);
+    const row = this.attendance.find((a) => a.rollNo === entry.rollNo && a.courseCode === entry.courseCode);
+    if (row) { row.conducted += 1; if (entry.status === 'present') row.present += 1; }
+    return { ...entry };
+  }
+
+  async updateAttendance(entry) {
+    await this.wait();
+    const who = this.current || { role: 'admin', username: 'admin' };
+    if (who.role !== 'teacher') throw new ApiError('Only teachers may update attendance.', { status: 403 });
+    if (!(this.teaches[who.username] || []).includes(entry.courseCode)) throw new ApiError('You may update attendance only for courses assigned to you.', { status: 403 });
+    const key = `${entry.rollNo}|${entry.courseCode}|${entry.sessionDate}`;
+    if (!this.attendanceSessions.has(key)) throw new ApiError('No attendance entry exists for that student, course and date.', { status: 404 });
+    if (!['present', 'absent'].includes(entry.status)) throw new ApiError('Check the attendance status and session date.', { status: 400 });
+    const previous = this.attendanceSessions.get(key);
+    const row = this.attendance.find((a) => a.rollNo === entry.rollNo && a.courseCode === entry.courseCode);
+    if (row && previous !== entry.status) row.present += entry.status === 'present' ? 1 : -1;
+    this.attendanceSessions.set(key, entry.status);
+    return { ...entry };
+  }
+  async createTimetableSlot(slot) {
+    await this.wait();
+    if (!this.current || this.current.role !== 'admin') {
+      throw new ApiError('Only administrators can create timetable slots.', { status: 403 });
+    }
+    if (!this.subjects[slot.courseCode] || this.subjects[slot.courseCode].semester !== slot.semester ||
+        !(this.teaches[slot.teacher] || []).includes(slot.courseCode)) {
+      throw new ApiError('The selected teacher is not assigned to this course.', {
+        status: 400, code: 'invalid_assignment',
+      });
+    }
+    const conflict = this.timetable.some((old) =>
+      old.dayOfWeek === slot.dayOfWeek && old.semester === slot.semester &&
+      old.startTime < slot.endTime && old.endTime > slot.startTime &&
+      (old.teacher === slot.teacher || old.room === slot.room));
+    if (conflict) {
+      throw new ApiError('The teacher or room is already booked during this time.', {
+        status: 409, code: 'timetable_conflict',
+      });
+    }
+    const created = {
+      ...slot,
+      id: Math.max(0, ...this.timetable.map((item) => item.id)) + 1,
+      courseName: this.subjects[slot.courseCode].name,
+      teacherName: this.teacherNames[slot.teacher],
+    };
+    this.timetable.push(created);
+    return { ...created };
   }
 
   async getTimetable({ teacher = '', department = '', semester = 0 } = {}) {

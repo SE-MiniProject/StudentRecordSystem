@@ -737,3 +737,27 @@ dialog.modal .dialog-head {
   text-align: center;
   color: var(--text-muted);
 }
+
+/* -------------------------------- timetable slot creation (SRS-F-019) */
+
+.slot-builder {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.slot-builder > input,
+.slot-builder > select {
+  min-width: 7rem;
+  flex: 1 1 8rem;
+}
+
+.slot-builder > input[type="time"] {
+  flex: 0 1 9rem;
+}
+
+.slot-builder > button {
+  flex: 0 0 auto;
+}

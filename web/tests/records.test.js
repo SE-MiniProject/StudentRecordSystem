@@ -269,6 +269,36 @@ describe('ApiClient.getAttendance', () => {
   });
 });
 
+describe('ApiClient attendance writes (SRS-24)', () => {
+  const entry = { rollNo: '1ABC26CS001', courseCode: 'CS501', sessionDate: '2026-11-05', status: 'present' };
+
+  test('creates a session with POST', async () => {
+    const s = stub({ status: 201, body: entry });
+    await s.client().createAttendance(entry);
+    assert.equal(s.calls[0].method, 'POST');
+    assert.equal(s.calls[0].url, '/api/attendance');
+    assert.deepEqual(JSON.parse(s.calls[0].body), entry);
+  });
+
+  test('updates an existing session with PUT', async () => {
+    const s = stub({ status: 200, body: entry });
+    await s.client().updateAttendance(entry);
+    assert.equal(s.calls[0].method, 'PUT');
+    assert.equal(s.calls[0].url, '/api/attendance/1ABC26CS001/CS501/2026-11-05');
+    assert.deepEqual(JSON.parse(s.calls[0].body), { status: 'present' });
+  });
+
+  test('duplicate creation is a conflict', async () => {
+    const s = stub({ status: 409, body: { error: 'conflict' } });
+    await assert.rejects(s.client().createAttendance(entry), /already exists/);
+  });
+
+  test('update requires an existing session', async () => {
+    const s = stub({ status: 404, body: { error: 'not_found' } });
+    await assert.rejects(s.client().updateAttendance(entry), /No attendance entry exists/);
+  });
+});
+
 describe('attendance percentage formatting', () => {
   test('two decimals, and a dash for no sessions', async () => {
     // Imported lazily: the page module touches `document` only when a page is built.
@@ -298,6 +328,22 @@ describe('MockApiClient attendance', () => {
     await assert.rejects(student.getAttendance('PES2UG23CS101'), (e) => e.status === 403);
   });
 
+  test('teacher can record, update, and cannot duplicate a session', async () => {
+    const api = new MockApiClient({ latency: 0 });
+    await api.login('teacher', 'teacher123');
+    const entry = { rollNo: 'PES2UG23CS105', courseCode: 'CS501', sessionDate: '2026-11-05', status: 'present' };
+    await api.createAttendance(entry);
+    await assert.rejects(api.createAttendance(entry), (e) => e.status === 409);
+    await api.updateAttendance({ ...entry, status: 'absent' });
+    assert.equal(api.attendanceSessions.get('PES2UG23CS105|CS501|2026-11-05'), 'absent');
+  });
+
+  test('teacher cannot write attendance for an unassigned course', async () => {
+    const api = new MockApiClient({ latency: 0 });
+    await api.login('teacher', 'teacher123');
+    await assert.rejects(api.createAttendance({ rollNo: 'PES2UG23CS105', courseCode: 'CS502', sessionDate: '2026-11-05', status: 'present' }), (e) => e.status === 403);
+  });
+
   test('every role may open Attendance', () => {
     for (const role of [Role.Admin, Role.Teacher, Role.Student]) {
       assert.equal(canUse(role, 'attendance.view'), true, role);
@@ -322,6 +368,31 @@ describe('ApiClient.getTimetable', () => {
     await assert.rejects(s.client().getTimetable({ teacher: 'other' }), (e) => {
       assert.equal(e.status, 403);
       assert.match(e.message, /only view your own schedule/);
+      return true;
+    });
+  });
+});
+
+describe('ApiClient.createTimetableSlot (SRS-F-019/F-021)', () => {
+  const slot = {
+    dayOfWeek: 1, startTime: '13:00', endTime: '14:00', courseCode: 'CS501',
+    teacher: 'teacher', department: 'Computer Science', semester: 5, room: 'C101',
+  };
+
+  test('posts the complete slot and returns the created row', async () => {
+    const created = { ...slot, id: 9, courseName: 'DBMS', teacherName: 'Demo Teacher' };
+    const s = stub({ status: 201, body: created });
+    assert.deepEqual(await s.client().createTimetableSlot(slot), created);
+    assert.equal(s.calls[0].url, '/api/timetable');
+    assert.equal(s.calls[0].method, 'POST');
+    assert.deepEqual(JSON.parse(s.calls[0].body), slot);
+  });
+
+  test('409 explains a teacher or room conflict', async () => {
+    const s = stub({ status: 409, body: { error: { code: 'timetable_conflict' } } });
+    await assert.rejects(s.client().createTimetableSlot(slot), (error) => {
+      assert.equal(error.status, 409);
+      assert.match(error.message, /teacher or room is already booked/);
       return true;
     });
   });
@@ -376,6 +447,39 @@ describe('MockApiClient timetable scoping', () => {
   test('admin sees every slot', async () => {
     const api = await as('admin', 'admin123');
     assert.equal((await api.getTimetable()).items.length, 8);
+  });
+
+  test('admin creates a slot and the mock timetable reflects it', async () => {
+    const api = await as('admin', 'admin123');
+    const created = await api.createTimetableSlot({
+      dayOfWeek: 1, startTime: '13:00', endTime: '14:00', courseCode: 'CS501',
+      teacher: 'teacher', department: 'CSE-AIML', semester: 5, room: 'C101',
+    });
+    assert.equal(created.courseCode, 'CS501');
+    assert.equal((await api.getTimetable()).items.length, 9);
+  });
+
+  test('mock rejects a teacher or room overlap without changing slots', async () => {
+    const api = await as('admin', 'admin123');
+    const before = (await api.getTimetable()).items.length;
+    await assert.rejects(api.createTimetableSlot({
+      dayOfWeek: 1, startTime: '09:30', endTime: '10:30', courseCode: 'CS503',
+      teacher: 'teacher', department: 'CSE-AIML', semester: 5, room: 'C101',
+    }), (error) => error.status === 409);
+    assert.equal((await api.getTimetable()).items.length, before);
+  });
+
+  test('mock only allows assigned teacher-course pairs', async () => {
+    const api = await as('admin', 'admin123');
+    await assert.rejects(api.createTimetableSlot({
+      dayOfWeek: 1, startTime: '13:00', endTime: '14:00', courseCode: 'CS502',
+      teacher: 'teacher', department: 'CSE-AIML', semester: 5, room: 'C101',
+    }), (error) => error.status === 400);
+  });
+
+  test('teacher cannot create a slot in mock mode', async () => {
+    const api = await as('teacher', 'teacher123');
+    await assert.rejects(api.createTimetableSlot({}), (error) => error.status === 403);
   });
 
   test('every role may open the timetable', () => {

@@ -1,11 +1,14 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
 #include <map>
 #include <optional>
 #include <string>
+#include <set>
 #include <vector>
 
 #include "attendance/attendance_routes.h"
@@ -42,10 +45,41 @@ public:
         return out;
     }
 
+    srs::AttendanceWriteResult Write(const srs::AttendanceEntry& entry,
+                                     const std::string& teacher, bool update) override {
+        if (fail) return srs::AttendanceWriteResult::kError;
+        bool assigned = false;
+        for (const auto& code : teaches[teacher]) assigned = assigned || code == entry.course_code;
+        if (!assigned) return srs::AttendanceWriteResult::kForbidden;
+        const std::string key = entry.roll_no + "|" + entry.course_code + "|" + entry.session_date;
+        if (update) {
+            if (!written.count(key)) return srs::AttendanceWriteResult::kNotFound;
+            const bool previous = values[key];
+            values[key] = entry.present;
+            if (previous != entry.present) {
+                for (auto& row : by_roll[entry.roll_no]) {
+                    if (row.course_code == entry.course_code) row.present += entry.present ? 1 : -1;
+                }
+            }
+        } else {
+            if (!written.insert(key).second) return srs::AttendanceWriteResult::kDuplicate;
+            values[key] = entry.present;
+            auto& rows = by_roll[entry.roll_no];
+            auto it = std::find_if(rows.begin(), rows.end(), [&](const auto& row) {
+                return row.course_code == entry.course_code;
+            });
+            if (it == rows.end()) rows.push_back(srs::AttendanceCount{entry.course_code, entry.course_code, 5, 1, entry.present ? 1 : 0});
+            else { ++it->conducted; if (entry.present) ++it->present; }
+        }
+        return srs::AttendanceWriteResult::kOk;
+    }
+
     std::map<std::string, std::vector<srs::AttendanceCount>> by_roll;
     std::map<std::string, std::vector<std::string>> teaches;
     std::optional<srs::AttendanceQuery> last_query;
     bool fail = false;
+    std::set<std::string> written;
+    std::map<std::string, bool> values;
 };
 
 srs::AttendanceCount Row(const std::string& code, int sem, long long conducted, long long present) {
@@ -77,6 +111,71 @@ protected:
 
     FakeAttendance attendance;
 };
+
+
+// SRS-24: teacher-only session entry, duplicate protection and explicit updates.
+TEST_F(AttendanceRoutes, TeacherRecordsAttendanceForAssignedCourse) {
+    const auto res = PostAs("/api/attendance", "teacher-token",
+        R"({"rollNo":"1ABC26CS001","courseCode":"CS501","sessionDate":"2026-11-05","status":"present"})");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 201) << res->body;
+}
+
+TEST_F(AttendanceRoutes, DuplicateSessionEntryIsConflict) {
+    const std::string body = R"({"rollNo":"1ABC26CS001","courseCode":"CS501","sessionDate":"2026-11-05","status":"present"})";
+    ASSERT_EQ(PostAs("/api/attendance", "teacher-token", body)->status, 201);
+    const auto res = PostAs("/api/attendance", "teacher-token", body);
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 409);
+}
+
+TEST_F(AttendanceRoutes, TeacherCanUpdateExistingAttendance) {
+    const std::string body = R"({"rollNo":"1ABC26CS001","courseCode":"CS501","sessionDate":"2026-11-05","status":"present"})";
+    ASSERT_EQ(PostAs("/api/attendance", "teacher-token", body)->status, 201);
+    const auto res = PutAs("/api/attendance/1ABC26CS001/CS501/2026-11-05", "teacher-token",
+                           R"({"status":"absent"})");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 200);
+    EXPECT_FALSE(attendance.values["1ABC26CS001|CS501|2026-11-05"]);
+    const auto view = Body("/api/attendance/1ABC26CS001?courseCode=CS501", "admin-token");
+    EXPECT_EQ(view["items"][0]["conducted"], 41);
+    EXPECT_EQ(view["items"][0]["present"], 34);
+    EXPECT_DOUBLE_EQ(view["items"][0]["percentage"].get<double>(), 82.93);
+}
+
+TEST_F(AttendanceRoutes, UpdatingMissingSessionReturnsNotFound) {
+    const auto res = PutAs("/api/attendance/1ABC26CS001/CS501/2026-11-05", "teacher-token",
+                           R"({"status":"absent"})");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 404);
+}
+
+TEST_F(AttendanceRoutes, FutureSessionDateIsRejected) {
+    const auto res = PostAs("/api/attendance", "teacher-token",
+        R"({"rollNo":"1ABC26CS001","courseCode":"CS501","sessionDate":"2099-11-05","status":"present"})");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+}
+
+TEST_F(AttendanceRoutes, UnassignedTeacherCannotRecordAttendance) {
+    const auto res = PostAs("/api/attendance", "teacher-token",
+        R"({"rollNo":"1ABC26CS001","courseCode":"CS502","sessionDate":"2026-11-05","status":"present"})");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 403);
+}
+
+TEST_F(AttendanceRoutes, AdminAndStudentCannotRecordAttendance) {
+    const std::string body = R"({"rollNo":"1ABC26CS001","courseCode":"CS501","sessionDate":"2026-11-05","status":"present"})";
+    EXPECT_EQ(PostAs("/api/attendance", "admin-token", body)->status, 403);
+    EXPECT_EQ(PostAs("/api/attendance", "student-token", body)->status, 403);
+}
+
+TEST_F(AttendanceRoutes, InvalidAttendanceStatusIsRejected) {
+    const auto res = PostAs("/api/attendance", "teacher-token",
+        R"({"rollNo":"1ABC26CS001","courseCode":"CS501","sessionDate":"2026-11-05","status":"late"})");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+}
 
 // --- AC-017: correct role-scoped records ------------------------------------
 
