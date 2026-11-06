@@ -16,7 +16,7 @@ import { Role, canUse } from '../js/session.js';
 function stub(response) {
   const calls = [];
   const fetch = async (url, init = {}) => {
-    calls.push({ url, method: init.method, headers: init.headers });
+    calls.push({ url, method: init.method, headers: init.headers, body: init.body });
     const body = response.body === undefined ? '' : response.body;
     return {
       status: response.status,
@@ -174,6 +174,36 @@ describe('ApiClient.getAttendance', () => {
   });
 });
 
+describe('ApiClient attendance writes (SRS-24)', () => {
+  const entry = { rollNo: '1ABC26CS001', courseCode: 'CS501', sessionDate: '2026-11-05', status: 'present' };
+
+  test('creates a session with POST', async () => {
+    const s = stub({ status: 201, body: entry });
+    await s.client().createAttendance(entry);
+    assert.equal(s.calls[0].method, 'POST');
+    assert.equal(s.calls[0].url, '/api/attendance');
+    assert.deepEqual(JSON.parse(s.calls[0].body), entry);
+  });
+
+  test('updates an existing session with PUT', async () => {
+    const s = stub({ status: 200, body: entry });
+    await s.client().updateAttendance(entry);
+    assert.equal(s.calls[0].method, 'PUT');
+    assert.equal(s.calls[0].url, '/api/attendance/1ABC26CS001/CS501/2026-11-05');
+    assert.deepEqual(JSON.parse(s.calls[0].body), { status: 'present' });
+  });
+
+  test('duplicate creation is a conflict', async () => {
+    const s = stub({ status: 409, body: { error: 'conflict' } });
+    await assert.rejects(s.client().createAttendance(entry), /already exists/);
+  });
+
+  test('update requires an existing session', async () => {
+    const s = stub({ status: 404, body: { error: 'not_found' } });
+    await assert.rejects(s.client().updateAttendance(entry), /No attendance entry exists/);
+  });
+});
+
 describe('attendance percentage formatting', () => {
   test('two decimals, and a dash for no sessions', async () => {
     // Imported lazily: the page module touches `document` only when a page is built.
@@ -201,6 +231,22 @@ describe('MockApiClient attendance', () => {
     const student = new MockApiClient({ latency: 0 });
     await student.login('student', 'student123');
     await assert.rejects(student.getAttendance('PES2UG23CS101'), (e) => e.status === 403);
+  });
+
+  test('teacher can record, update, and cannot duplicate a session', async () => {
+    const api = new MockApiClient({ latency: 0 });
+    await api.login('teacher', 'teacher123');
+    const entry = { rollNo: 'PES2UG23CS105', courseCode: 'CS501', sessionDate: '2026-11-05', status: 'present' };
+    await api.createAttendance(entry);
+    await assert.rejects(api.createAttendance(entry), (e) => e.status === 409);
+    await api.updateAttendance({ ...entry, status: 'absent' });
+    assert.equal(api.attendanceSessions.get('PES2UG23CS105|CS501|2026-11-05'), 'absent');
+  });
+
+  test('teacher cannot write attendance for an unassigned course', async () => {
+    const api = new MockApiClient({ latency: 0 });
+    await api.login('teacher', 'teacher123');
+    await assert.rejects(api.createAttendance({ rollNo: 'PES2UG23CS105', courseCode: 'CS502', sessionDate: '2026-11-05', status: 'present' }), (e) => e.status === 403);
   });
 
   test('every role may open Attendance', () => {

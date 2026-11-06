@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "attendance/attendance_store.h"
@@ -41,6 +42,42 @@ class PgAttendanceStore final : public AttendanceStore {
 public:
     explicit PgAttendanceStore(std::string db_url) : db_url_(std::move(db_url)) {}
 
+    AttendanceWriteResult Write(const AttendanceEntry& entry, const std::string& teacher,
+                                bool update) override {
+        try {
+            pqxx::connection conn(db_url_);
+            pqxx::work tx(conn);
+            const auto assigned = tx.exec(
+                "SELECT EXISTS (SELECT 1 FROM teacher_subjects "
+                "WHERE username = $1 AND subject_code = $2)",
+                pqxx::params{teacher, entry.course_code});
+            if (!assigned[0][0].as<bool>()) return AttendanceWriteResult::kForbidden;
+
+            if (update) {
+                const auto changed = tx.exec(
+                    "UPDATE attendance SET present = $4 "
+                    "WHERE roll_no = $1 AND subject_code = $2 AND session_date = $3 "
+                    "RETURNING id",
+                    pqxx::params{entry.roll_no, entry.course_code, entry.session_date,
+                                 entry.present});
+                if (changed.empty()) return AttendanceWriteResult::kNotFound;
+            } else {
+                try {
+                    tx.exec("INSERT INTO attendance (roll_no, subject_code, session_date, present) "
+                            "VALUES ($1, $2, $3, $4)",
+                            pqxx::params{entry.roll_no, entry.course_code, entry.session_date,
+                                         entry.present});
+                } catch (const pqxx::unique_violation&) {
+                    return AttendanceWriteResult::kDuplicate;
+                }
+            }
+            tx.commit();
+            return AttendanceWriteResult::kOk;
+        } catch (const pqxx::failure&) {
+            return AttendanceWriteResult::kError;
+        }
+    }
+
     std::optional<std::vector<AttendanceCount>> CountsFor(const AttendanceQuery& q) override {
         try {
             pqxx::connection conn(db_url_);
@@ -72,6 +109,9 @@ class UnbackedAttendanceStore final : public AttendanceStore {
 public:
     std::optional<std::vector<AttendanceCount>> CountsFor(const AttendanceQuery&) override {
         return std::nullopt;
+    }
+    AttendanceWriteResult Write(const AttendanceEntry&, const std::string&, bool) override {
+        return AttendanceWriteResult::kError;
     }
 };
 
