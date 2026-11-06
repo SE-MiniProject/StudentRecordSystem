@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <cctype>
 
 #include "api/error_response.h"
 #include "auth/rbac.h"
@@ -65,6 +66,40 @@ std::string Param(const httplib::Request& req, const char* name) {
     return req.has_param(name) ? req.get_param_value(name) : std::string();
 }
 
+std::string StringField(const json& body, const char* key) {
+    return body.is_object() && body.contains(key) && body[key].is_string()
+               ? body[key].get<std::string>()
+               : std::string();
+}
+
+bool HasText(const std::string& value) {
+    for (const unsigned char ch : value) {
+        if (!std::isspace(ch)) return true;
+    }
+    return false;
+}
+
+bool ValidTime(const std::string& value) {
+    if (value.size() != 5 || value[2] != ':') return false;
+    if (!std::isdigit(static_cast<unsigned char>(value[0])) ||
+        !std::isdigit(static_cast<unsigned char>(value[1])) ||
+        !std::isdigit(static_cast<unsigned char>(value[3])) ||
+        !std::isdigit(static_cast<unsigned char>(value[4]))) return false;
+    const int hour = (value[0] - '0') * 10 + value[1] - '0';
+    const int minute = (value[3] - '0') * 10 + value[4] - '0';
+    return hour < 24 && minute < 60;
+}
+
+void SendSlotFieldErrors(httplib::Response& res, const httplib::Request& req,
+                         const json& fields) {
+    res.status = 400;
+    res.set_content(json{{"error", {{"code", "validation_failed"},
+                                     {"message", "one or more fields are invalid"},
+                                     {"fields", fields},
+                                     {"requestId", req.get_header_value("X-Request-Id")}}}}
+                        .dump(), "application/json");
+}
+
 // The (department, semester) a Student's account belongs to, via the
 // account's linked roll number. nullopt when the account has no linked student.
 std::optional<Student> OwnClass(ProfileStore& profiles, StudentStore& students,
@@ -80,6 +115,79 @@ void RegisterTimetableRoutes(httplib::Server& server, TimetableStore& timetable,
                              ProfileStore& profiles, StudentStore& students,
                              SessionStore& sessions) {
     const RbacGuard guard(sessions);
+
+    // POST /api/timetable — Admin creates a weekly slot (SRS-F-019/F-021).
+    server.Post("/api/timetable", [&timetable, guard](const httplib::Request& req,
+                                                       httplib::Response& res) {
+        Principal who;
+        if (!GuardAllows(guard.RequireRole(req, {Role::kAdmin}, &who), req, res)) return;
+
+        json body;
+        try {
+            body = json::parse(req.body);
+        } catch (const std::exception&) {
+            SendError(res, 400, "invalid_json", "request body must be valid JSON",
+                      req.get_header_value("X-Request-Id"));
+            return;
+        }
+
+        TimetableSlot slot;
+        slot.course_code = StringField(body, "courseCode");
+        slot.teacher_username = StringField(body, "teacher");
+        slot.department = StringField(body, "department");
+        slot.room = StringField(body, "room");
+        slot.start_time = StringField(body, "startTime");
+        slot.end_time = StringField(body, "endTime");
+        if (body.is_object() && body.contains("dayOfWeek") && body["dayOfWeek"].is_number_integer())
+            slot.day_of_week = body["dayOfWeek"].get<int>();
+        if (body.is_object() && body.contains("semester") && body["semester"].is_number_integer())
+            slot.semester = body["semester"].get<int>();
+
+        json fields = json::object();
+        if (!HasText(slot.course_code) || slot.course_code.size() > 32)
+            fields["courseCode"] = "must be 1-32 non-blank characters";
+        if (slot.teacher_username.size() < 3 || slot.teacher_username.size() > 64)
+            fields["teacher"] = "must be a valid teacher username";
+        if (!HasText(slot.department) || slot.department.size() > 100)
+            fields["department"] = "must be 1-100 non-blank characters";
+        if (!HasText(slot.room) || slot.room.size() > 32)
+            fields["room"] = "must be 1-32 non-blank characters";
+        if (slot.day_of_week < 1 || slot.day_of_week > 7)
+            fields["dayOfWeek"] = "must be an ISO weekday from 1 to 7";
+        if (slot.semester < 1 || slot.semester > 12)
+            fields["semester"] = "must be an integer from 1 to 12";
+        if (!ValidTime(slot.start_time)) fields["startTime"] = "must be a valid HH:MM time";
+        if (!ValidTime(slot.end_time)) fields["endTime"] = "must be a valid HH:MM time";
+        if (ValidTime(slot.start_time) && ValidTime(slot.end_time) &&
+            slot.start_time >= slot.end_time)
+            fields["endTime"] = "must be later than startTime";
+        if (!fields.empty()) {
+            SendSlotFieldErrors(res, req, fields);
+            return;
+        }
+
+        TimetableSlot created;
+        switch (timetable.Create(slot, &created)) {
+            case CreateTimetableResult::kCreated:
+                res.status = 201;
+                res.set_content(SlotToJson(created).dump(), "application/json");
+                return;
+            case CreateTimetableResult::kConflict:
+                SendError(res, 409, "timetable_conflict",
+                          "the teacher or room is already booked during this time",
+                          req.get_header_value("X-Request-Id"));
+                return;
+            case CreateTimetableResult::kInvalidAssignment:
+                SendError(res, 400, "invalid_assignment",
+                          "the teacher must be active and assigned to this course, and the course semester must match",
+                          req.get_header_value("X-Request-Id"), "teacher", "not assigned to course");
+                return;
+            case CreateTimetableResult::kError:
+                SendError(res, 500, "internal", "could not create timetable slot",
+                          req.get_header_value("X-Request-Id"));
+                return;
+        }
+    });
 
     // GET /api/timetable — the caller's own schedule.
     server.Get("/api/timetable", [&timetable, &profiles, &students, guard](
