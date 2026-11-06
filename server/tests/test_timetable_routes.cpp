@@ -13,9 +13,8 @@
 #include "timetable/timetable_routes.h"
 #include "timetable/timetable_store.h"
 
-// SRS-F-020 / AC-020 / TC-020: Teacher sees their own schedule, Student their
-// own class schedule, Admin all; fetching another user's schedule is rejected
-// server-side.
+// SRS-F-020 / AC-020 / TC-020: role-scoped reads. SRS-F-019/F-021:
+// Admin slot creation and server-side teacher/room overlap rejection.
 
 namespace {
 
@@ -36,9 +35,30 @@ public:
         return out;
     }
 
+    srs::CreateTimetableResult Create(const srs::TimetableSlot& slot,
+                                      srs::TimetableSlot* created) override {
+        if (fail) return srs::CreateTimetableResult::kError;
+        if (invalid_assignment) return srs::CreateTimetableResult::kInvalidAssignment;
+        for (const auto& old : slots) {
+            const bool same_scope = old.day_of_week == slot.day_of_week && old.semester == slot.semester;
+            const bool overlaps = old.start_time < slot.end_time && old.end_time > slot.start_time;
+            if (same_scope && overlaps &&
+                (old.teacher_username == slot.teacher_username || old.room == slot.room))
+                return srs::CreateTimetableResult::kConflict;
+        }
+        *created = slot;
+        created->id = next_id++;
+        created->course_name = slot.course_code + " name";
+        created->teacher_name = slot.teacher_username + " full";
+        slots.push_back(*created);
+        return srs::CreateTimetableResult::kCreated;
+    }
+
     std::vector<srs::TimetableSlot> slots;
     std::optional<srs::TimetableQuery> last_query;
     bool fail = false;
+    bool invalid_assignment = false;
+    long long next_id = 10;
 };
 
 class FakeProfiles final : public srs::ProfileStore {
@@ -105,6 +125,13 @@ protected:
     int Status(const std::string& path, const std::string& token) {
         const auto res = GetAs(path, token);
         return res ? res->status : -1;
+    }
+
+    httplib::Result CreateAs(const std::string& body, const std::string& token) {
+        httplib::Headers headers;
+        if (!token.empty()) headers.emplace("Authorization", "Bearer " + token);
+        return httplib::Client(base_url()).Post("/api/timetable", headers, body,
+                                                "application/json");
     }
 
     FakeTimetable timetable;
@@ -202,6 +229,86 @@ TEST_F(TimetableRoutes, ByRollNoTeacherIs403) {
 TEST_F(TimetableRoutes, ByRollNoAdminWorksAnd404sUnknown) {
     EXPECT_EQ(Ids("/api/timetable/1ABC26CS002", "admin-token").size(), 3u);
     EXPECT_EQ(Status("/api/timetable/UNKNOWN", "admin-token"), 404);
+}
+
+// --- SRS-F-019 / F-021: create and reject overlapping slots ------------------
+
+const std::string kValidSlot =
+    R"({"dayOfWeek":1,"startTime":"13:00","endTime":"14:00","courseCode":"CS501","teacher":"teacher","department":"Computer Science","semester":5,"room":"C101"})";
+
+TEST_F(TimetableRoutes, AdminCreatesAndStoresAValidSlot) {
+    const auto res = CreateAs(kValidSlot, "admin-token");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 201) << res->body;
+    const auto body = json::parse(res->body);
+    EXPECT_EQ(body["dayOfWeek"], 1);
+    EXPECT_EQ(body["startTime"], "13:00");
+    EXPECT_EQ(body["endTime"], "14:00");
+    EXPECT_EQ(body["courseCode"], "CS501");
+    EXPECT_EQ(body["teacher"], "teacher");
+    EXPECT_EQ(body["room"], "C101");
+    EXPECT_EQ(timetable.slots.size(), 5u);
+}
+
+TEST_F(TimetableRoutes, OnlyAdminMayCreateASlot) {
+    EXPECT_EQ(CreateAs(kValidSlot, "teacher-token")->status, 403);
+    EXPECT_EQ(CreateAs(kValidSlot, "student-token")->status, 403);
+    EXPECT_EQ(timetable.slots.size(), 4u);
+}
+
+TEST_F(TimetableRoutes, InvalidSlotFieldsAreRejectedBeforeStorage) {
+    const auto res = CreateAs(
+        R"({"dayOfWeek":8,"startTime":"25:00","endTime":"09:60","courseCode":"","teacher":"t","department":"","semester":0,"room":""})",
+        "admin-token");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+    const auto body = json::parse(res->body);
+    EXPECT_EQ(body["error"]["code"], "validation_failed");
+    EXPECT_TRUE(body["error"]["fields"].contains("dayOfWeek"));
+    EXPECT_TRUE(body["error"]["fields"].contains("startTime"));
+    EXPECT_TRUE(body["error"]["fields"].contains("endTime"));
+    EXPECT_EQ(timetable.slots.size(), 4u);
+}
+
+TEST_F(TimetableRoutes, TeacherOverlapOnSameDayAndSemesterIsConflict) {
+    const auto res = CreateAs(
+        R"({"dayOfWeek":1,"startTime":"09:30","endTime":"10:30","courseCode":"CS503","teacher":"teacher","department":"Computer Science","semester":5,"room":"C101"})",
+        "admin-token");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 409);
+    EXPECT_EQ(json::parse(res->body)["error"], "timetable_conflict");
+    EXPECT_EQ(timetable.slots.size(), 4u);
+}
+
+TEST_F(TimetableRoutes, RoomOverlapWithAnotherTeacherIsConflict) {
+    const auto res = CreateAs(
+        R"({"dayOfWeek":1,"startTime":"09:30","endTime":"10:30","courseCode":"CS502","teacher":"teacher2","department":"Computer Science","semester":5,"room":"A101"})",
+        "admin-token");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 409);
+    EXPECT_EQ(timetable.slots.size(), 4u);
+}
+
+TEST_F(TimetableRoutes, TouchingIntervalsAndOtherSemestersAreAllowed) {
+    const auto touching = CreateAs(
+        R"({"dayOfWeek":1,"startTime":"10:00","endTime":"10:30","courseCode":"CS503","teacher":"teacher","department":"Computer Science","semester":5,"room":"C101"})",
+        "admin-token");
+    ASSERT_TRUE(touching);
+    EXPECT_EQ(touching->status, 201) << touching->body;
+    const auto other_semester = CreateAs(
+        R"({"dayOfWeek":1,"startTime":"09:30","endTime":"10:30","courseCode":"CS503","teacher":"teacher","department":"Computer Science","semester":3,"room":"A101"})",
+        "admin-token");
+    ASSERT_TRUE(other_semester);
+    EXPECT_EQ(other_semester->status, 201) << other_semester->body;
+}
+
+TEST_F(TimetableRoutes, UnassignedTeacherCoursePairIsRejected) {
+    timetable.invalid_assignment = true;
+    const auto res = CreateAs(kValidSlot, "admin-token");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+    EXPECT_EQ(json::parse(res->body)["error"], "invalid_assignment");
+    EXPECT_EQ(timetable.slots.size(), 4u);
 }
 
 // --- error paths ------------------------------------------------------------

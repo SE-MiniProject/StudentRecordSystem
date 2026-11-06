@@ -47,6 +47,7 @@ export function createTimetablePage({ api, session, onUnauthorized }) {
   // so there is nothing to choose — and the server refuses anything else.
   let filters = null;
   let toolbar = null;
+  let builder = null;
   if (isAdmin) {
     filters = {
       teacher: el('input', { type: 'search', placeholder: 'Teacher username', 'aria-label': 'Teacher username', autocomplete: 'off' }),
@@ -72,6 +73,46 @@ export function createTimetablePage({ api, session, onUnauthorized }) {
       filters.semester,
       el('button', { type: 'submit', class: 'primary' }, 'Apply'),
     );
+
+    const day = el('select', { name: 'dayOfWeek', required: true, 'aria-label': 'Day' },
+      ...DAYS.map((name, index) => el('option', { value: String(index + 1) }, name)));
+    const start = el('input', { type: 'time', name: 'startTime', required: true, 'aria-label': 'Start time' });
+    const end = el('input', { type: 'time', name: 'endTime', required: true, 'aria-label': 'End time' });
+    const course = el('input', { name: 'courseCode', required: true, maxLength: 32, placeholder: 'Course code', 'aria-label': 'Course code' });
+    const teacher = el('input', { name: 'teacher', required: true, maxLength: 64, placeholder: 'Teacher username', 'aria-label': 'Teacher username' });
+    const department = el('input', { name: 'department', required: true, maxLength: 100, placeholder: 'Department', 'aria-label': 'Department' });
+    const semester = el('input', { type: 'number', name: 'semester', required: true, min: 1, max: 12, step: 1, placeholder: 'Semester', 'aria-label': 'Semester' });
+    const room = el('input', { name: 'room', required: true, maxLength: 32, placeholder: 'Room', 'aria-label': 'Room' });
+    builder = el('form', {
+      class: 'toolbar record-toolbar slot-builder',
+      'aria-label': 'Create timetable slot',
+      onsubmit: async (event) => {
+        event.preventDefault();
+        const submit = builder.querySelector('button[type="submit"]');
+        submit.disabled = true;
+        status.set('Creating timetable slot…', 'info');
+        try {
+          await api.createTimetableSlot({
+            dayOfWeek: Number(day.value),
+            startTime: start.value,
+            endTime: end.value,
+            courseCode: course.value.trim(),
+            teacher: teacher.value.trim(),
+            department: department.value.trim(),
+            semester: Number(semester.value),
+            room: room.value.trim(),
+          });
+          builder.reset();
+          await load();
+          status.set('Timetable slot created.', 'success');
+        } catch (error) {
+          status.set((error && error.message) || 'Could not create the timetable slot.', 'error');
+        } finally {
+          submit.disabled = false;
+        }
+      },
+    }, day, start, end, course, teacher, department, semester, room,
+    el('button', { type: 'submit', class: 'primary' }, 'Create slot'));
   }
 
   const title = {
@@ -85,6 +126,7 @@ export function createTimetablePage({ api, session, onUnauthorized }) {
     { class: 'page' },
     el('header', { class: 'page-head' }, el('div', {}, el('h1', {}, title), scopeLine)),
     toolbar,
+    builder,
     status.node,
     grid,
   );

@@ -420,6 +420,30 @@ export class ApiClient {
    * Teacher own slots, Student own class, Admin all (filters optional, Admin
    * only). Asking for anyone else's schedule is a 403 from the server.
    */
+  /** POST /api/timetable — Admin creates a slot after server conflict checks. */
+  async createTimetableSlot(slot, { signal } = {}) {
+    const { status, body } = await this.request('POST', '/api/timetable', { body: slot, signal });
+    if (status === 201) return body;
+    if (status === 400) {
+      const env = errorEnvelope(body);
+      throw new ApiError(
+        env.code === 'invalid_assignment'
+          ? 'The teacher must be assigned to this course and its semester must match.'
+          : 'Please check the timetable slot fields.',
+        { status, ...env },
+      );
+    }
+    if (status === 403) {
+      throw new ApiError('Only administrators can create timetable slots.', { status, ...errorEnvelope(body) });
+    }
+    if (status === 409) {
+      throw new ApiError('The teacher or room is already booked during this time.', {
+        status, ...errorEnvelope(body),
+      });
+    }
+    throw new ApiError(ApiClient.unexpected(status, body), { status, ...errorEnvelope(body) });
+  }
+
   async getTimetable({ teacher = '', department = '', semester = 0, signal } = {}) {
     const query = new URLSearchParams();
     if (teacher) query.set('teacher', teacher);
@@ -517,7 +541,7 @@ export class MockApiClient {
       CS503: { name: 'Computer Networks', semester: 5 },
       CS301: { name: 'Data Structures', semester: 3 },
     };
-    this.teaches = { teacher: ['CS501', 'CS503'] };
+    this.teaches = { teacher: ['CS501', 'CS503'], teacher2: ['CS502', 'CS301'] };
     this.grades = MockApiClient.seedGrades(this.students);
     this.attendance = MockApiClient.seedAttendance(this.students);
     this.attendanceSessions = new Map();
@@ -811,6 +835,34 @@ export class MockApiClient {
     if (row && previous !== entry.status) row.present += entry.status === 'present' ? 1 : -1;
     this.attendanceSessions.set(key, entry.status);
     return { ...entry };
+  async createTimetableSlot(slot) {
+    await this.wait();
+    if (!this.current || this.current.role !== 'admin') {
+      throw new ApiError('Only administrators can create timetable slots.', { status: 403 });
+    }
+    if (!this.subjects[slot.courseCode] || this.subjects[slot.courseCode].semester !== slot.semester ||
+        !(this.teaches[slot.teacher] || []).includes(slot.courseCode)) {
+      throw new ApiError('The selected teacher is not assigned to this course.', {
+        status: 400, code: 'invalid_assignment',
+      });
+    }
+    const conflict = this.timetable.some((old) =>
+      old.dayOfWeek === slot.dayOfWeek && old.semester === slot.semester &&
+      old.startTime < slot.endTime && old.endTime > slot.startTime &&
+      (old.teacher === slot.teacher || old.room === slot.room));
+    if (conflict) {
+      throw new ApiError('The teacher or room is already booked during this time.', {
+        status: 409, code: 'timetable_conflict',
+      });
+    }
+    const created = {
+      ...slot,
+      id: Math.max(0, ...this.timetable.map((item) => item.id)) + 1,
+      courseName: this.subjects[slot.courseCode].name,
+      teacherName: this.teacherNames[slot.teacher],
+    };
+    this.timetable.push(created);
+    return { ...created };
   }
 
   async getTimetable({ teacher = '', department = '', semester = 0 } = {}) {

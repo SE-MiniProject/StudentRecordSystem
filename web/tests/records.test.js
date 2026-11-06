@@ -278,6 +278,31 @@ describe('ApiClient.getTimetable', () => {
   });
 });
 
+describe('ApiClient.createTimetableSlot (SRS-F-019/F-021)', () => {
+  const slot = {
+    dayOfWeek: 1, startTime: '13:00', endTime: '14:00', courseCode: 'CS501',
+    teacher: 'teacher', department: 'Computer Science', semester: 5, room: 'C101',
+  };
+
+  test('posts the complete slot and returns the created row', async () => {
+    const created = { ...slot, id: 9, courseName: 'DBMS', teacherName: 'Demo Teacher' };
+    const s = stub({ status: 201, body: created });
+    assert.deepEqual(await s.client().createTimetableSlot(slot), created);
+    assert.equal(s.calls[0].url, '/api/timetable');
+    assert.equal(s.calls[0].method, 'POST');
+    assert.deepEqual(JSON.parse(s.calls[0].body), slot);
+  });
+
+  test('409 explains a teacher or room conflict', async () => {
+    const s = stub({ status: 409, body: { error: { code: 'timetable_conflict' } } });
+    await assert.rejects(s.client().createTimetableSlot(slot), (error) => {
+      assert.equal(error.status, 409);
+      assert.match(error.message, /teacher or room is already booked/);
+      return true;
+    });
+  });
+});
+
 describe('timetable layout', () => {
   test('weekdays across, ordered time rows down, slots placed by day and time', async () => {
     const { layoutWeek } = await import('../js/pages/timetable.js');
@@ -327,6 +352,39 @@ describe('MockApiClient timetable scoping', () => {
   test('admin sees every slot', async () => {
     const api = await as('admin', 'admin123');
     assert.equal((await api.getTimetable()).items.length, 8);
+  });
+
+  test('admin creates a slot and the mock timetable reflects it', async () => {
+    const api = await as('admin', 'admin123');
+    const created = await api.createTimetableSlot({
+      dayOfWeek: 1, startTime: '13:00', endTime: '14:00', courseCode: 'CS501',
+      teacher: 'teacher', department: 'CSE-AIML', semester: 5, room: 'C101',
+    });
+    assert.equal(created.courseCode, 'CS501');
+    assert.equal((await api.getTimetable()).items.length, 9);
+  });
+
+  test('mock rejects a teacher or room overlap without changing slots', async () => {
+    const api = await as('admin', 'admin123');
+    const before = (await api.getTimetable()).items.length;
+    await assert.rejects(api.createTimetableSlot({
+      dayOfWeek: 1, startTime: '09:30', endTime: '10:30', courseCode: 'CS503',
+      teacher: 'teacher', department: 'CSE-AIML', semester: 5, room: 'C101',
+    }), (error) => error.status === 409);
+    assert.equal((await api.getTimetable()).items.length, before);
+  });
+
+  test('mock only allows assigned teacher-course pairs', async () => {
+    const api = await as('admin', 'admin123');
+    await assert.rejects(api.createTimetableSlot({
+      dayOfWeek: 1, startTime: '13:00', endTime: '14:00', courseCode: 'CS502',
+      teacher: 'teacher', department: 'CSE-AIML', semester: 5, room: 'C101',
+    }), (error) => error.status === 400);
+  });
+
+  test('teacher cannot create a slot in mock mode', async () => {
+    const api = await as('teacher', 'teacher123');
+    await assert.rejects(api.createTimetableSlot({}), (error) => error.status === 403);
   });
 
   test('every role may open the timetable', () => {
