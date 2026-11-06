@@ -11,6 +11,10 @@ on:
       # asset path is a server-visible failure. Run this job on web changes too.
       - "web/**"
       - ".github/workflows/server.yml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "compose.yaml"
+      - ".env.example"
 
 jobs:
   build-and-test:
@@ -402,3 +406,54 @@ jobs:
             echo "credential or token leaked into server logs"
             exit 1
           fi
+  docker-build:
+    name: Validate Docker image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          tags: student-record-system:ci
+  publish-image:
+    name: Publish Docker image
+    needs: [build-and-test, docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/se-miniproject/studentrecordsystem:latest
+            ghcr.io/se-miniproject/studentrecordsystem:sha-${{ github.sha }}

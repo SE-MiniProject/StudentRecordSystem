@@ -1,0 +1,118 @@
+name: student-record-system
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-srs}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  migrate:
+    image: postgres:16
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGDATABASE: ${POSTGRES_DB:-srs}
+    volumes:
+      - ./db/migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        for file in /migrations/*.sql; do
+          [ -f "$$file" ] || continue
+          echo "Applying $$file"
+          psql -v ON_ERROR_STOP=1 -f "$$file"
+        done
+    restart: "no"
+
+  # Development fixtures only.
+  seed:
+    image: postgres:16
+    profiles: ["dev"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGDATABASE: ${POSTGRES_DB:-srs}
+    volumes:
+      - ./db/seeds:/seeds:ro
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        for file in /seeds/*.sql; do
+          [ -f "$$file" ] || continue
+          echo "Loading $$file"
+          psql -v ON_ERROR_STOP=1 -f "$$file"
+        done
+    restart: "no"
+
+  app-dev:
+    profiles: ["dev"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: student-record-system:local
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-srs}
+      SRS_TLS_CERT_FILE: /run/srs/tls/server.crt
+      SRS_TLS_KEY_FILE: /run/srs/tls/server.key
+      SRS_WEB_ROOT: /app/web
+      PORT: 8443
+    ports:
+      - "${SRS_DEV_HTTPS_PORT:-8080}:8443"
+    volumes:
+      - dev_tls:/run/srs/tls
+    entrypoint:
+      - /bin/sh
+      - -ec
+    command:
+      - |
+        umask 077
+        if [ ! -s "$$SRS_TLS_CERT_FILE" ] || [ ! -s "$$SRS_TLS_KEY_FILE" ]; then
+          openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+            -keyout "$$SRS_TLS_KEY_FILE" \
+            -out "$$SRS_TLS_CERT_FILE" \
+            -subj '/CN=localhost' \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+        fi
+        exec /app/srs_server
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl --insecure --fail https://127.0.0.1:8443/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+volumes:
+  postgres_data:
+  dev_tls:

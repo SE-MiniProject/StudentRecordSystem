@@ -10,3 +10,7 @@ build-server/
 
 # Playwright/Chromium smoke-test scratch profile
 web/.smoke-profile/
+
+# Local Docker Compose configuration and production TLS material
+.env
+certs/

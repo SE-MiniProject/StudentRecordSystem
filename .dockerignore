@@ -1,0 +1,12 @@
+.git
+.github
+.gitignore
+build
+build-*
+server/build
+web/node_modules
+web/.smoke-profile
+*.zip
+*.patch
+.env
+certs
