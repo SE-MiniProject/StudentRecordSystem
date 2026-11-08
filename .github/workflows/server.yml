@@ -377,6 +377,7 @@ jobs:
             -d '{"dayOfWeek":5,"startTime":"15:00","endTime":"16:00","courseCode":"CS501","teacher":"teacher","department":"Computer Science","semester":5,"room":"CI-ROOM-1"}')
           echo "create timetable slot: $created_slot"
           [ "$created_slot" = "201" ] || { echo "expected 201 from timetable create, got $created_slot"; exit 1; }
+          slots_before_conflicts=$(slots "" "$admin")
 
           teacher_overlap=$(status_of -X POST "$base/api/timetable" \
             -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
@@ -391,7 +392,7 @@ jobs:
           [ "$teacher_overlap" = "409" ] && [ "$room_overlap" = "409" ] && [ "$teacher_create" = "403" ] \
             || { echo "timetable conflict or role enforcement failed"; exit 1; }
           after_conflicts=$(slots "" "$admin")
-          [ "${after_conflicts%% *}" = "9" ] || { echo "conflicting timetable requests changed existing slots: $after_conflicts"; exit 1; }
+          [ "$after_conflicts" = "$slots_before_conflicts" ] || { echo "conflicting timetable requests changed existing slots: before=$slots_before_conflicts after=$after_conflicts"; exit 1; }
 
           # --- SRS-19 create account, SRS-17 patch account ---
           account=$(status_of -X POST "$base/api/accounts" \
