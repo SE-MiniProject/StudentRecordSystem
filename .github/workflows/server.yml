@@ -177,15 +177,19 @@ jobs:
           body = json.load(sys.stdin)
           assert body["user"]["username"] == "admin", body
           assert body["user"]["role"] == "admin", body
-          assert body["user"]["fullName"] == "System Administrator", body
+          assert body["user"]["fullName"] == "Anil Deshmukh", body
           assert body["expiresAt"], body
           '
 
           admin=$(login admin admin)
           teacher=$(login teacher teacher)
           student=$(login student student)
+          teacher3=$(login neha.kulkarni neha123)
+          teacher4=$(login rahul.verma rahul123)
+          student2=$(login student2 student2)
           [ -n "$admin" ] && [ -n "$teacher" ] && [ -n "$student" ] \
-            || { echo "one of the three seeded accounts did not log in"; exit 1; }
+            && [ -n "$teacher3" ] && [ -n "$teacher4" ] && [ -n "$student2" ] \
+            || { echo "one of the seeded accounts did not log in"; exit 1; }
 
           # --- SRS-16 view and search, role-scoped ---
           list=$(curl -fsS "$base/api/students?limit=1" -H "Authorization: Bearer $admin")
@@ -195,7 +199,7 @@ jobs:
           body = json.load(sys.stdin)
           assert body["limit"] == 1, body
           assert len(body["items"]) == 1, body
-          assert body["total"] >= 2, body
+          assert body["total"] >= 25, body
           assert set(body["items"][0]) == {
               "rollNo", "fullName", "dateOfBirth", "department", "semester", "contact"}, body
           '
@@ -206,6 +210,14 @@ jobs:
           body = json.load(sys.stdin)
           assert body["total"] == 1, body
           assert body["items"][0]["rollNo"] == "1ABC26CS002", body
+          '
+
+          aditi=$(curl -fsS "$base/api/students?search=Aditi" -H "Authorization: Bearer $admin")
+          printf '%s' "$aditi" | python3 -c '
+          import json, sys
+          body = json.load(sys.stdin)
+          assert body["total"] == 1, body
+          assert body["items"][0]["rollNo"] == "1ABC26CS003", body
           '
 
           # limit above the documented maximum is a client error, not a clamp.
@@ -276,6 +288,11 @@ jobs:
           [ "$g_teacher" = "CS501,CS503" ] || { echo "teacher should see only own subjects"; exit 1; }
           [ "$g_teacher2" = "CS502" ] || { echo "teacher2 should see only own subject"; exit 1; }
           [ "$g_student" = "$g_admin" ] || { echo "student should see all own grades"; exit 1; }
+          g_neha=$(codes 1ABC26EC001 "$teacher3")
+          g_rahul=$(codes 1ABC26IS001 "$teacher4")
+          echo "additional teacher grades: neha=$g_neha rahul=$g_rahul"
+          [ "$g_neha" = "EC501,EC502" ] || { echo "Neha should see only assigned EC subjects"; exit 1; }
+          [ "$g_rahul" = "IS301,IS302" ] || { echo "Rahul should see only assigned IS subjects"; exit 1; }
 
           g_other=$(status_of "$base/api/grades/1ABC26CS002" -H "Authorization: Bearer $student")
           echo "student reading another student's grades: $g_other"
@@ -287,6 +304,12 @@ jobs:
           import json, sys
           body = json.load(sys.stdin)
           assert body["rollNo"] == "1ABC26CS001", body
+          '
+          me2=$(curl -fsS "$base/api/me" -H "Authorization: Bearer $student2")
+          printf '%s' "$me2" | python3 -c '
+          import json, sys
+          body = json.load(sys.stdin)
+          assert body["rollNo"] == "1ABC26CS003", body
           '
 
           # --- SRS-F-017/F-018 attendance and percentage (AC-017, AC-018) ---
@@ -328,11 +351,17 @@ jobs:
           t_teacher=$(slots "" "$teacher")
           t_teacher2=$(slots "" "$teacher2")
           t_student=$(slots "" "$student")
-          echo "timetable admin=[$t_admin] teacher=[$t_teacher] teacher2=[$t_teacher2] student=[$t_student]"
-          [ "$t_admin" = "8 teacher,teacher2 3,5" ] || { echo "admin should see all 8 slots"; exit 1; }
+          t_neha=$(slots "" "$teacher3")
+          t_rahul=$(slots "" "$teacher4")
+          t_student2=$(slots "" "$student2")
+          echo "timetable admin=[$t_admin] teacher=[$t_teacher] teacher2=[$t_teacher2] student=[$t_student] neha=[$t_neha] rahul=[$t_rahul] student2=[$t_student2]"
+          [ "$t_admin" = "16 neha.kulkarni,rahul.verma,teacher,teacher2 3,5" ] || { echo "admin should see all 16 slots"; exit 1; }
           [ "$t_teacher" = "4 teacher 5" ] || { echo "teacher should see only own 4 slots"; exit 1; }
           [ "$t_teacher2" = "4 teacher2 3,5" ] || { echo "teacher2 should see only own 4 slots"; exit 1; }
           [ "$t_student" = "6 teacher,teacher2 5" ] || { echo "student should see own class (6 slots)"; exit 1; }
+          [ "$t_neha" = "4 neha.kulkarni 5" ] || { echo "Neha should see only her 4 slots"; exit 1; }
+          [ "$t_rahul" = "4 rahul.verma 3" ] || { echo "Rahul should see only his 4 slots"; exit 1; }
+          [ "$t_student2" = "6 teacher,teacher2 5" ] || { echo "Aditi should see her class schedule"; exit 1; }
 
           t_cross=$(status_of "$base/api/timetable?teacher=teacher2" -H "Authorization: Bearer $teacher")
           t_class=$(status_of "$base/api/timetable?semester=3" -H "Authorization: Bearer $student")

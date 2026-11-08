@@ -12,7 +12,7 @@ namespace srs {
 namespace {
 
 // The demo seed is a fixture other people rely on: an end-to-end login test and
-// anyone running the server locally log in as one of these three accounts. A
+// anyone running the server locally log in as one of these four accounts. A
 // mismatch between a row's salt and its digest is invisible at seed time — the
 // rows insert happily and every login is then rejected as a wrong password,
 // which reads like an auth bug rather than a data bug.
@@ -33,6 +33,7 @@ const char* PasswordFor(const std::string& username) {
     if (username == "admin") return "admin";
     if (username == "teacher") return "teacher";
     if (username == "student") return "student";
+    if (username == "student2") return "student2";
     return nullptr;
 }
 
@@ -91,7 +92,7 @@ TEST(SeedData, EveryUserRowAuthenticates) {
     ASSERT_FALSE(sql.empty());
 
     const auto rows = ParseSeedRows(sql);
-    ASSERT_EQ(rows.size(), 3u) << "expected the three demo accounts";
+    ASSERT_EQ(rows.size(), 4u) << "expected the four demo accounts";
 
     for (const auto& row : rows) {
         const char* password = PasswordFor(row.username);
