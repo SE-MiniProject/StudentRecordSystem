@@ -358,7 +358,9 @@ describe('session', () => {
   test('the permission table gates by role', () => {
     assert.equal(canUse(Role.Admin, 'accounts.manage'), true);
     assert.equal(canUse(Role.Teacher, 'accounts.manage'), false);
-    assert.equal(canUse(Role.Student, 'students.view'), true);
+    assert.equal(canUse(Role.Admin, 'students.view'), true);
+    assert.equal(canUse(Role.Teacher, 'students.view'), true);
+    assert.equal(canUse(Role.Student, 'students.view'), false);
     assert.equal(canUse(Role.Teacher, 'students.delete'), false);
     assert.equal(canUse(Role.Admin, 'students.delete'), true);
     assert.equal(canUse(Role.Admin, 'not.in.the.table'), false);
