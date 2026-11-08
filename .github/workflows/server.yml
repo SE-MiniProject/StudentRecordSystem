@@ -72,8 +72,11 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f db/migrations/003_subjects_teaching.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/004_timetable.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/005_timetable_conflicts.sql
+          psql -v ON_ERROR_STOP=1 -f db/migrations/006_semester_indexes.sql
+          psql -v ON_ERROR_STOP=1 -f db/checks/semester_indexes.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_data.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_records.sql
+          psql -v ON_ERROR_STOP=1 -f db/checks/semester_filtering.sql
 
       # Applying the whole chain a second time must change no rows. Every table
       # in db/ is expected to be re-runnable, because that is what happens when
@@ -88,8 +91,11 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f db/migrations/003_subjects_teaching.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/004_timetable.sql
           psql -v ON_ERROR_STOP=1 -f db/migrations/005_timetable_conflicts.sql
+          psql -v ON_ERROR_STOP=1 -f db/migrations/006_semester_indexes.sql
+          psql -v ON_ERROR_STOP=1 -f db/checks/semester_indexes.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_data.sql
           psql -v ON_ERROR_STOP=1 -f db/seeds/demo_records.sql
+          psql -v ON_ERROR_STOP=1 -f db/checks/semester_filtering.sql
           after=$(psql -tA -c "SELECT (SELECT count(*) FROM users)||','||(SELECT count(*) FROM students)||','||(SELECT count(*) FROM grades)||','||(SELECT count(*) FROM attendance)||','||(SELECT count(*) FROM subjects)||','||(SELECT count(*) FROM teacher_subjects)||','||(SELECT count(*) FROM timetable);")
           echo "before=$before after=$after"
           if [ "$before" != "$after" ]; then
