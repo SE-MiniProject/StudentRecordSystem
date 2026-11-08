@@ -39,7 +39,7 @@ export function allowed(role, minimum) {
 
 /** The post-login shell's permission table, in one place (SRS-15). */
 export const ACTIONS = Object.freeze([
-  { name: 'students.view', label: 'View / Search', minimum: Role.Student },
+  { name: 'students.view', label: 'View / Search', minimum: Role.Teacher },
   { name: 'students.create', label: 'Add Student', minimum: Role.Admin },
   { name: 'students.update', label: 'Edit Student', minimum: Role.Admin },
   { name: 'students.delete', label: 'Delete Student', minimum: Role.Admin },

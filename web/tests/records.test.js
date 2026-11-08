@@ -219,6 +219,12 @@ describe('MockApiClient grade scoping', () => {
 });
 
 describe('navigation permissions', () => {
+  test('admins and teachers may open the Students directory, students may not', () => {
+    assert.equal(canUse(Role.Admin, 'students.view'), true);
+    assert.equal(canUse(Role.Teacher, 'students.view'), true);
+    assert.equal(canUse(Role.Student, 'students.view'), false);
+  });
+
   test('every role may open Grades', () => {
     for (const role of [Role.Admin, Role.Teacher, Role.Student]) {
       assert.equal(canUse(role, 'grades.view'), true, role);
