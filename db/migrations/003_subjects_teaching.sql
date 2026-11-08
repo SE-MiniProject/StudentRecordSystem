@@ -6,11 +6,11 @@
 -- database records which subjects are theirs.
 --
 -- grades.subject_code and attendance.subject_code are deliberately NOT given a
--- foreign key to subjects here. Existing rows, tests/acceptance.sh and any
--- in-flight grade/attendance entry work insert arbitrary codes; a new FK would
--- turn those inserts into failures in someone else's lane. Reads LEFT JOIN
--- subjects instead, so an unknown code still displays (with its code as the
--- name) and simply belongs to no teacher.
+-- foreign key to subjects here. Existing rows and any in-flight grade or
+-- attendance entry work insert arbitrary codes; a new FK would turn those
+-- inserts into failures in someone else's lane. Reads LEFT JOIN subjects
+-- instead, so an unknown code still displays (with its code as the name) and
+-- simply belongs to no teacher.
 --
 -- Re-runnable: every statement is IF NOT EXISTS, so CI's "apply twice, compare
 -- row counts" check passes.
