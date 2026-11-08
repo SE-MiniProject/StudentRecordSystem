@@ -361,32 +361,50 @@ check(await evalJs("(() => { const n = [...document.querySelectorAll('.nav-item'
 check(await evalJs("![...document.querySelectorAll('button')].some(b=>/Add student/.test(b.textContent))"), 'teacher cannot see Add student');
 
 // --- Sprint 2: grade entry and role-scoped reads (SRS-23 / SRS-F-014) -----
-// Teacher can update a grade for an assigned subject; the page refreshes the
-// selected student's rows after the write.
+// Teacher now sees a populated student list by default; per-row action opens a
+// dialog where the actual write happens.
 await evalJs("[...document.querySelectorAll('.nav-item')].find(b=>b.textContent === 'Grades').click()");
 await waitFor("document.getElementById('grades-table') !== null", 'grades page');
+await waitFor("document.querySelectorAll('#grades-table tbody tr').length > 0", 'teacher student rows');
+check(await evalJs("document.querySelectorAll('#grades-table tbody tr').length > 0"), 'teacher sees a populated student list');
+check(await evalJs("document.querySelector('#grades-table tbody td')?.textContent === 'PES2UG23CS105'"), 'teacher sees only students in their assigned classes');
+
+// Open the per-row grade dialog for the student we know is in the teacher's class.
+await evalJs("document.querySelector('#grades-table tbody .row-actions button').click()");
+await waitFor("document.querySelector('dialog.modal') !== null", 'grade dialog');
+check(await evalJs("document.querySelector('dialog.modal table') !== null"), 'dialog shows existing grades');
+check(await evalJs("document.querySelector('dialog.modal form') !== null"), 'dialog has a grade entry form');
+
 await evalJs(`(() => {
-  const form = document.querySelector('.grade-entry-form');
-  form.querySelector('#grade-entry-roll').value = 'PES2UG23CS101';
-  form.querySelector('#grade-entry-course').value = 'CS501';
-  form.querySelector('#grade-entry-value').value = '8.2';
-  form.requestSubmit();
+  const d = document.querySelector('dialog.modal');
+  d.querySelector('input[name=courseCode]').value = 'CS501';
+  d.querySelector('input[name=grade]').value = '8.2';
+  d.querySelector('button[type=submit]').click();
 })()`);
-await waitFor("[...document.querySelectorAll('#grades-table tbody tr')].some(row => row.cells[0]?.textContent === 'CS501' && row.cells[3]?.textContent === '8.2')", 'saved grade appears');
+await waitFor("[...document.querySelectorAll('dialog.modal tbody td')].some(td => td.textContent === '8.2')", 'saved grade appears in dialog');
 check(true, 'teacher can update a grade for an assigned subject');
-// Teacher looks up a student and sees only their own two subjects.
+
+// Close the dialog and verify search narrows the student list.
+await evalJs("document.querySelector('dialog.modal .ghost[aria-label=Close]').click()");
+await sleep(200);
 await evalJs(`(() => {
-  const input = document.querySelector('.page input[type=search]');
-  input.value = 'PES2UG23CS101';
-  input.form.requestSubmit();
+  const input = document.querySelector('#grade-student-search');
+  input.value = 'zzz-nobody';
+  document.querySelector('.toolbar').requestSubmit();
 })()`);
-await waitFor("document.querySelectorAll('#grades-table tbody tr').length > 0", 'teacher grade rows');
-check(await evalJs("[...document.querySelectorAll('#grades-table tbody tr td:first-child')].map(td=>td.textContent).sort().join(',') === 'CS501,CS503'"), 'teacher sees only own subjects');
+await sleep(700);
+await waitFor("document.querySelectorAll('#grades-table tbody .row-actions').length === 0 && document.querySelector('#grades-table tbody .empty') !== null", 'search narrows the student list');
+check(true, 'search shows the empty state instead of student rows');
+await evalJs(`(() => {
+  document.querySelector('#grade-student-search').value = '';
+  document.querySelector('.toolbar').requestSubmit();
+})()`);
+await sleep(700);
 
 await evalJs("[...document.querySelectorAll('button')].find(b=>/log out/i.test(b.textContent)).click()");
 await waitFor("document.querySelector('.login-card') !== null", 'back to login (teacher)');
 
-// Student: no roll-number box, own grades load straight away.
+// Student: read-only, no list, no form, own grades shown directly.
 await evalJs(`(() => {
   document.getElementById('login-username').value = 'student';
   document.getElementById('login-password').value = 'student123';
@@ -395,7 +413,7 @@ await evalJs(`(() => {
 await waitFor("document.querySelector('.shell') !== null", 'student shell');
 await evalJs("[...document.querySelectorAll('.nav-item')].find(b=>b.textContent === 'My grades').click()");
 await waitFor("document.querySelectorAll('#grades-table tbody tr').length > 0", 'student grade rows');
-check(await evalJs("document.querySelector('.page input[type=search]') === null"), 'student has no roll-number box');
+check(await evalJs("document.querySelector('.page input[type=search]') === null"), 'student has no search box on grades');
 check(await evalJs("document.querySelectorAll('#grades-table tbody tr').length === 4"), 'student sees all own grades');
 
 // --- Sprint 2: attendance with server percentage (SRS-F-017/F-018) ----------
