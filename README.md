@@ -42,12 +42,17 @@ The application uses HTTPS. There is no plaintext HTTP mode.
 
 Development accounts:
 
-| Role | Username | Password |
-|---|---|---|
-| Admin | `admin` | `admin` |
-| Teacher | `teacher` | `teacher` |
-| Teacher | `teacher2` | `teacher2` |
-| Student | `student` | `student` |
+| Role | Display name | Username | Password |
+|---|---|---|---|
+| Admin | Anil Deshmukh | `admin` | `admin` |
+| Teacher | Dr. Meera Nair | `teacher` | `teacher` |
+| Teacher | Prof. Arjun Menon | `teacher2` | `teacher2` |
+| Teacher | Dr. Neha Kulkarni | `neha.kulkarni` | `neha123` |
+| Teacher | Prof. Rahul Verma | `rahul.verma` | `rahul123` |
+| Student | Aarav Sharma | `student` | `student` |
+| Student | Aditi Nair | `student2` | `student2` |
+
+All accounts and records above are development fixtures. The seed preserves the original four usernames and passwords.
 
 Stop the development stack:
 
