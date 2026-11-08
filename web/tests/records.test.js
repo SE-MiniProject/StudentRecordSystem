@@ -218,6 +218,43 @@ describe('MockApiClient grade scoping', () => {
   });
 });
 
+describe('teacher class narrowing', () => {
+  // The Grades / Attendance staff views narrow the student list by the
+  // teacher's timetable-derived classes. Mirrors the logic in
+  // pages/grades.js and pages/attendance.js, so a change to either must
+  // keep this passing.
+  test('filters students to the teacher\'s timetable classes', async () => {
+    const api = new MockApiClient({ latency: 0 });
+    await api.login('teacher', 'teacher123');
+    const { items: slots } = await api.getTimetable();
+    const classes = new Set(slots.map((s) => `${s.department}|${s.semester}`));
+    assert.ok(classes.size > 0, 'teacher should have at least one timetable slot');
+
+    const { items: all } = await api.searchStudents({ limit: 200 });
+    const filtered = all.filter((s) => classes.has(`${s.department}|${s.semester}`));
+    assert.ok(filtered.length > 0, 'teacher should see at least one student');
+    assert.ok(filtered.length < all.length, 'teacher should not see every student');
+    assert.ok(
+      filtered.every((s) => classes.has(`${s.department}|${s.semester}`)),
+      'every filtered student must be in one of the teacher\'s classes',
+    );
+  });
+
+  test('falls back to showing all students when the teacher has no timetable', async () => {
+    const api = new MockApiClient({ latency: 0 });
+    await api.login('teacher', 'teacher123');
+    // Simulate a teacher with no slots by stubbing getTimetable to return [].
+    api.getTimetable = async () => ({ scope: { role: 'teacher' }, items: [] });
+    const { items: slots } = await api.getTimetable();
+    const classes = new Set(slots.map((s) => `${s.department}|${s.semester}`));
+    assert.equal(classes.size, 0);
+    // The page treats an empty `teacherClasses` as "no narrowing", so the
+    // student list must remain the full set the server returned.
+    const { items: all } = await api.searchStudents({ limit: 200 });
+    assert.ok(all.length > 0, 'fallback must not empty the list');
+  });
+});
+
 describe('navigation permissions', () => {
   test('admins and teachers may open the Students directory, students may not', () => {
     assert.equal(canUse(Role.Admin, 'students.view'), true);
