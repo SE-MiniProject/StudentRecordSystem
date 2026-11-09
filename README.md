@@ -31,7 +31,7 @@ cp .env.example .env
 Start the database, apply migrations, load development fixtures, build the server image, and start the application:
 
 ```sh
-docker compose --profile dev up --build app-dev
+docker compose --profile dev up --force-recreate migrate
 ```
 
 Open **https://localhost:8080**.
@@ -91,7 +91,12 @@ ctest --test-dir build --output-on-failure
 
 ### Browser smoke tests
 
-A browser smoke-test script is not currently included in this repository. The web unit tests and the CI HTTPS/API smoke checks are available as described above and in `.github/workflows/server.yml`.
+Install the web test dependencies required by `web/tests/smoke.mjs`, then run:
+
+```sh
+cd web
+npm run test:smoke
+```
 
 ## Repository layout
 
