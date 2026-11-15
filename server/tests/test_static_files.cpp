@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "api/router.h"
 #include "server_fixture.h"
@@ -25,6 +27,7 @@ protected:
         root_ = fs::temp_directory_path() / ("srs_static_only_" + std::to_string(::getpid()));
         fs::remove_all(root_);
         fs::create_directories(root_ / "js");
+        fs::create_directories(root_ / "css");
 
         std::ofstream(root_ / "index.html") << "<!doctype html><title>srs</title>";
         std::ofstream(root_ / "js" / "app.js") << "console.log('srs');";
@@ -81,6 +84,29 @@ TEST_F(StaticOnlyFixture, NestedAssetServesWithJavaScriptMime) {
     // exact type is part of the behaviour, not a detail.
     EXPECT_EQ(res->get_header_value("Content-Type"), "text/javascript; charset=utf-8");
     EXPECT_EQ(res->body, "console.log('srs');");
+}
+
+TEST_F(StaticOnlyFixture, SupportedAssetExtensionsUseTheirExactMimeTypes) {
+    const std::vector<std::pair<std::string, std::string>> assets{
+        {"app.css", "text/css; charset=utf-8"},
+        {"module.mjs", "text/javascript; charset=utf-8"},
+        {"data.json", "application/json; charset=utf-8"},
+        {"icon.svg", "image/svg+xml"},
+        {"image.png", "image/png"},
+        {"favicon.ico", "image/x-icon"},
+        {"font.woff2", "font/woff2"},
+    };
+
+    for (const auto& [name, mime] : assets) {
+        const fs::path dir = name.ends_with(".css") ? root_ / "css" : root_ / "js";
+        std::ofstream(dir / name, std::ios::binary) << "asset";
+        const std::string route = name.ends_with(".css") ? "/css/" : "/js/";
+        const auto res = Get(route + name);
+        ASSERT_TRUE(res) << name << ": " << httplib::to_string(res.error());
+        EXPECT_EQ(res->status, 200) << name;
+        EXPECT_EQ(res->get_header_value("Content-Type"), mime) << name;
+        EXPECT_EQ(res->body, "asset") << name;
+    }
 }
 
 TEST_F(StaticOnlyFixture, MissingAssetIs404WithJsonEnvelope) {

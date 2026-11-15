@@ -177,6 +177,41 @@ TEST_F(AttendanceRoutes, InvalidAttendanceStatusIsRejected) {
     EXPECT_EQ(res->status, 400);
 }
 
+TEST_F(AttendanceRoutes, RejectsMalformedAndIncompleteCreateBodies) {
+    EXPECT_EQ(PostAs("/api/attendance", "teacher-token", "{")->status, 400);
+    EXPECT_EQ(PostAs("/api/attendance", "teacher-token", "[]")->status, 400);
+    EXPECT_EQ(PostAs("/api/attendance", "teacher-token",
+        R"({"rollNo":4,"courseCode":"CS501","sessionDate":"2026-11-05","status":"present"})")->status, 400);
+}
+
+TEST_F(AttendanceRoutes, RejectsInvalidAttendanceFieldsBeforeStoreWrite) {
+    const std::string base = R"({"rollNo":"1ABC26CS001","courseCode":"CS501","sessionDate":"2026-11-05","status":"present"})";
+    auto body = json::parse(base);
+    body["rollNo"] = "";
+    EXPECT_EQ(PostAs("/api/attendance", "teacher-token", body.dump())->status, 400);
+    body = json::parse(base);
+    body["courseCode"] = std::string(33, 'X');
+    EXPECT_EQ(PostAs("/api/attendance", "teacher-token", body.dump())->status, 400);
+    body = json::parse(base);
+    body["sessionDate"] = "not-a-date";
+    EXPECT_EQ(PostAs("/api/attendance", "teacher-token", body.dump())->status, 400);
+}
+
+TEST_F(AttendanceRoutes, MissingStudentAndStoreFailureAreReported) {
+    EXPECT_EQ(PostAs("/api/attendance", "teacher-token",
+        R"({"rollNo":"MISSING","courseCode":"CS501","sessionDate":"2026-11-05","status":"present"})")->status, 404);
+    attendance.fail = true;
+    EXPECT_EQ(PostAs("/api/attendance", "teacher-token",
+        R"({"rollNo":"1ABC26CS001","courseCode":"CS501","sessionDate":"2026-11-05","status":"present"})")->status, 500);
+}
+
+TEST_F(AttendanceRoutes, UpdateRejectsMalformedAndNonObjectBodies) {
+    const std::string path = "/api/attendance/1ABC26CS001/CS501/2026-11-05";
+    EXPECT_EQ(PutAs(path, "teacher-token", "{")->status, 400);
+    EXPECT_EQ(PutAs(path, "teacher-token", "[]")->status, 400);
+    EXPECT_EQ(PutAs(path, "teacher-token", R"({"status":1})")->status, 400);
+}
+
 // --- AC-017: correct role-scoped records ------------------------------------
 
 TEST_F(AttendanceRoutes, StudentReadsOwnAttendance) {

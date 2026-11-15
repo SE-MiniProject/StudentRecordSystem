@@ -148,11 +148,15 @@ public:
 
 class FakeAccountStore final : public srs::AccountStore {
 public:
-    std::optional<std::vector<srs::Account>> List() override { return accounts; }
+    std::optional<std::vector<srs::Account>> List() override {
+        if (fail_list) return std::nullopt;
+        return accounts;
+    }
 
     srs::CreateAccountResult Create(const std::string& username, const std::string&,
                                     const std::string& full_name,
                                     const std::string& role) override {
+        if (fail_create) return srs::CreateAccountResult::kError;
         if (by_name.count(username) != 0) {
             return srs::CreateAccountResult::kDuplicateUsername;
         }
@@ -164,6 +168,7 @@ public:
 
     srs::PatchAccountResult Patch(const std::string& username,
                                   const srs::AccountChanges& changes) override {
+        if (fail_patch) return srs::PatchAccountResult::kError;
         auto it = by_name.find(username);
         if (it == by_name.end()) {
             return srs::PatchAccountResult::kNotFound;
@@ -190,6 +195,9 @@ public:
 
     std::vector<srs::Account> accounts;
     std::map<std::string, srs::Account> by_name;
+    bool fail_list = false;
+    bool fail_create = false;
+    bool fail_patch = false;
 };
 
 // One fixture that wires the real routes to fakes, so the tests exercise the
@@ -298,6 +306,17 @@ TEST_F(StudentRoutesFixture, LimitAboveTwoHundredIsRejectedNotClamped) {
     EXPECT_EQ(WithToken("GET", "/api/students?limit=0", "admin-token")->status, 400);
 }
 
+TEST_F(StudentRoutesFixture, ListRejectsNegativeOffsetAndDefaultsMalformedNumbers) {
+    EXPECT_EQ(WithToken("GET", "/api/students?offset=-1", "admin-token")->status, 400);
+    const auto res = WithToken("GET", "/api/students?limit=bad&offset=bad&semester=bad",
+                               "admin-token");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 200);
+    const auto body = json::parse(res->body);
+    EXPECT_EQ(body["limit"], 50);
+    EXPECT_EQ(body["offset"], 0);
+}
+
 TEST_F(StudentRoutesFixture, StudentMayReadOwnRecordOnly) {
     EXPECT_EQ(WithToken("GET", "/api/students/1PE21CS001", "student-token")->status, 200);
     EXPECT_EQ(WithToken("GET", "/api/students/1PE21CS002", "student-token")->status, 403);
@@ -349,6 +368,33 @@ TEST_F(StudentRoutesFixture, CreateStudentRequiresEveryField) {
     for (const char* field : {"rollNo", "fullName", "department", "semester"}) {
         EXPECT_TRUE(fields.contains(field)) << "missing " << field;
     }
+}
+
+TEST_F(StudentRoutesFixture, CreateRejectsMalformedAndNonObjectBodies) {
+    EXPECT_EQ(WithToken("POST", "/api/students", "admin-token", "{")->status, 400);
+    EXPECT_EQ(WithToken("POST", "/api/students", "admin-token", "[]")->status, 400);
+    const auto wrong_types = WithToken(
+        "POST", "/api/students", "admin-token",
+        R"({"rollNo":7,"fullName":false,"dateOfBirth":null,"department":[],"contact":4,"semester":"5"})");
+    ASSERT_TRUE(wrong_types);
+    EXPECT_EQ(wrong_types->status, 400);
+    const auto fields = json::parse(wrong_types->body)["error"]["fields"];
+    EXPECT_TRUE(fields.contains("rollNo"));
+    EXPECT_TRUE(fields.contains("fullName"));
+    EXPECT_TRUE(fields.contains("dateOfBirth"));
+    EXPECT_TRUE(fields.contains("department"));
+    EXPECT_TRUE(fields.contains("contact"));
+    EXPECT_TRUE(fields.contains("semester"));
+}
+
+TEST_F(StudentRoutesFixture, UpdateTreatsWrongTypesAsAbsentAndRejectsMalformedJson) {
+    EXPECT_EQ(WithToken("PUT", "/api/students/1PE21CS001", "admin-token", "{")->status, 400);
+    const auto res = WithToken(
+        "PUT", "/api/students/1PE21CS001", "admin-token",
+        R"({"fullName":4,"department":null,"contact":false,"semester":"5","rollNo":"ignored"})");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 200);
+    EXPECT_EQ(json::parse(res->body)["rollNo"], "1PE21CS001");
 }
 
 TEST_F(StudentRoutesFixture, CreateStudentSucceedsAndIsReadableAfterwards) {
@@ -429,6 +475,84 @@ TEST_F(StudentRoutesFixture, DeactivatingAnAccountRoundTrips) {
         WithToken("PATCH", "/api/accounts/newteach", "admin-token", R"({"active":false})");
     ASSERT_EQ(patched->status, 200);
     EXPECT_EQ(json::parse(patched->body)["active"], false);
+}
+
+TEST_F(StudentRoutesFixture, AccountListReportsStoreFailure) {
+    accounts->fail_list = true;
+    const auto res = WithToken("GET", "/api/accounts", "admin-token");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 500);
+    EXPECT_EQ(json::parse(res->body)["error"], "internal_error");
+}
+
+TEST_F(StudentRoutesFixture, AccountCreateRejectsMalformedAndNonObjectBodies) {
+    EXPECT_EQ(WithToken("POST", "/api/accounts", "admin-token", "{")->status, 400);
+    EXPECT_EQ(WithToken("POST", "/api/accounts", "admin-token", "[]")->status, 400);
+    EXPECT_EQ(WithToken("POST", "/api/accounts", "admin-token", "null")->status, 400);
+}
+
+TEST_F(StudentRoutesFixture, AccountCreateReportsAllInvalidFields) {
+    const auto res = WithToken(
+        "POST", "/api/accounts", "admin-token",
+        R"({"username":"X","password":"short","fullName":"","role":"superuser"})");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+    const auto fields = json::parse(res->body)["error"]["fields"];
+    EXPECT_TRUE(fields.contains("username"));
+    EXPECT_TRUE(fields.contains("password"));
+    EXPECT_TRUE(fields.contains("fullName"));
+    EXPECT_TRUE(fields.contains("role"));
+}
+
+TEST_F(StudentRoutesFixture, AccountCreateReportsStoreFailure) {
+    accounts->fail_create = true;
+    const auto res = WithToken(
+        "POST", "/api/accounts", "admin-token",
+        R"({"username":"newteach","password":"secret123","fullName":"New Teacher","role":"teacher"})");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 500);
+}
+
+TEST_F(StudentRoutesFixture, AccountPatchHandlesMalformedNonObjectAndInvalidBodies) {
+    EXPECT_EQ(WithToken("PATCH", "/api/accounts/teacher", "admin-token", "{")->status, 400);
+    // A non-object body yields no patch fields; the store then reports the
+    // target account is absent rather than treating the JSON as malformed.
+    EXPECT_EQ(WithToken("PATCH", "/api/accounts/teacher", "admin-token", "[]")->status, 404);
+    EXPECT_EQ(WithToken("PATCH", "/api/accounts/teacher", "admin-token",
+                        R"({"role":"superuser","fullName":"","password":"short"})")
+                  ->status,
+              400);
+}
+
+TEST_F(StudentRoutesFixture, AccountPatchReportsStoreFailureAndListFallbacks) {
+    accounts->by_name["not-listed"] = srs::Account{"not-listed", "Hidden", "teacher", true};
+    const auto fallback = WithToken("PATCH", "/api/accounts/not-listed", "admin-token",
+                                    R"({"fullName":"Updated"})");
+    ASSERT_TRUE(fallback);
+    EXPECT_EQ(fallback->status, 200);
+    const json fallback_body = json::parse(fallback->body);
+    EXPECT_EQ(fallback_body.at("username"), "not-listed");
+    EXPECT_EQ(fallback_body.size(), 1u);
+
+    ASSERT_EQ(WithToken("POST", "/api/accounts", "admin-token",
+                        R"({"username":"visible","password":"secret123","fullName":"Visible","role":"teacher"})")
+                  ->status,
+              201);
+    accounts->fail_list = true;
+    const auto no_list = WithToken("PATCH", "/api/accounts/visible", "admin-token",
+                                   R"({"active":"false"})");
+    ASSERT_TRUE(no_list);
+    EXPECT_EQ(no_list->status, 200);
+    const json no_list_body = json::parse(no_list->body);
+    EXPECT_EQ(no_list_body.at("username"), "visible");
+    EXPECT_EQ(no_list_body.size(), 1u);
+
+    accounts->fail_list = false;
+    accounts->fail_patch = true;
+    const auto failed = WithToken("PATCH", "/api/accounts/visible", "admin-token",
+                                  R"({"active":true})");
+    ASSERT_TRUE(failed);
+    EXPECT_EQ(failed->status, 500);
 }
 
 // --- SRS-26: delete student ------------------------------------------------
