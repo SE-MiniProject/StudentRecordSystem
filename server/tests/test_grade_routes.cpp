@@ -234,6 +234,37 @@ TEST_F(GradeRoutes, GradeEntryRejectsInvalidJson) {
     EXPECT_EQ(res->status, 400);
 }
 
+TEST_F(GradeRoutes, GradeEntryRejectsNonObjectAndInvalidIdentifierBodies) {
+    EXPECT_EQ(PostAs("/api/grades", "[]", "teacher-token")->status, 400);
+    EXPECT_EQ(PostAs("/api/grades", "null", "teacher-token")->status, 400);
+    EXPECT_EQ(PostAs("/api/grades",
+                     R"({"studentRollNo":7,"courseCode":"CS501","grade":8.0})",
+                     "teacher-token")->status,
+              400);
+    EXPECT_EQ(PostAs("/api/grades",
+                     R"({"studentRollNo":"1ABC26CS001","courseCode":7,"grade":8.0})",
+                     "teacher-token")->status,
+              400);
+    EXPECT_EQ(PostAs("/api/grades",
+                     R"({"studentRollNo":"","courseCode":"CS501","grade":8.0})",
+                     "teacher-token")->status,
+              400);
+    const std::string long_roll(33, 'R');
+    const std::string long_course(33, 'C');
+    EXPECT_EQ(PostAs("/api/grades",
+                     json{{"studentRollNo", long_roll}, {"courseCode", "CS501"}, {"grade", 8.0}}.dump(),
+                     "teacher-token")->status,
+              400);
+    EXPECT_EQ(PostAs("/api/grades",
+                     json{{"studentRollNo", "1ABC26CS001"}, {"courseCode", long_course}, {"grade", 8.0}}.dump(),
+                     "teacher-token")->status,
+              400);
+    EXPECT_EQ(PostAs("/api/grades",
+                     R"({"studentRollNo":"1ABC26CS001","courseCode":"CS501","grade":"8.0"})",
+                     "teacher-token")->status,
+              400);
+}
+
 TEST_F(GradeRoutes, GradeEntryStoreFailureIs500) {
     grades.fail = true;
     const auto res = PostAs("/api/grades",

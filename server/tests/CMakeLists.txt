@@ -16,6 +16,9 @@ FetchContent_MakeAvailable(googletest)
 add_executable(srs_tests
     test_health.cpp
     test_login.cpp
+    test_password_hash.cpp
+    test_default_stores.cpp
+    test_profile_routes.cpp
     test_logout.cpp
     test_rbac.cpp
     test_error_handler.cpp
@@ -38,6 +41,10 @@ target_compile_definitions(
     PRIVATE SRS_SEED_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../../db/seeds/demo_data.sql"
 )
 
+add_executable(srs_pg_tests test_pg_stores.cpp)
+target_link_libraries(srs_pg_tests PRIVATE srs_core GTest::gtest_main)
+
 
 include(GoogleTest)
 gtest_discover_tests(srs_tests)
+gtest_discover_tests(srs_pg_tests PROPERTIES LABELS "integration;postgres")

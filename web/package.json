@@ -2,14 +2,18 @@
   "name": "srs-web-client",
   "private": true,
   "version": "0.0.0",
-  "description": "Vanilla HTML/JS client for the Student Record System (replaces the Qt desktop client).",
+  "description": "Vanilla HTML/JS client for the Student Record System.",
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
     "test:smoke": "node tests/smoke.mjs",
+    "test:e2e": "playwright test",
     "serve": "python3 -m http.server 8080 --bind 127.0.0.1"
   },
   "engines": {
     "node": ">=21"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1"
   }
 }

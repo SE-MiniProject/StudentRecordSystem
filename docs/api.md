@@ -2,7 +2,7 @@
 
 Wire contract between the web client and the C++ server. Endpoints and roles from SAD §4.4, status codes from §4.5, fields from SRS §4.3–4.7.
 
-The contract is unchanged by the move from the Qt desktop client to the browser client: the server is untouched, so this file needs no endpoint, status-code, or field change. Changing it still requires a PR reviewed by both the client and server owners.
+This document describes the current API implementation and its request/response contract.
 
 ## Conventions
 
@@ -11,7 +11,7 @@ The contract is unchanged by the move from the Qt desktop client to the browser 
 - Timestamps ISO 8601 UTC: `2026-10-26T14:03:00Z`. Dates `YYYY-MM-DD`.
 - Students are addressed by roll number, which is immutable after create (F-010).
 - Unknown request fields are ignored.
-- Timetable endpoints are read-only in Sprint 2 (`GET`); `POST /api/timetable` is not implemented.
+- Timetable reads are role-scoped. Admins can create slots with `POST /api/timetable`; invalid assignments are rejected and teacher/room overlaps return `409`.
 
 ## Errors
 
@@ -286,11 +286,9 @@ That student's class timetable, same shape. A Student requesting another roll nu
 
 ### `POST /api/timetable` (Admin)
 
-Not implemented. TC-019 and TC-021 remain not implemented in the test plan; TC-020 is implemented.
+Admins can create slots with `POST /api/timetable`. The server validates required fields, time ranges, teacher/course assignments, and semester consistency. Teacher or room overlaps return `409`; back-to-back slots are allowed.
 
-## Decisions
-
-Settled 26 Oct 2026. Do not reopen without a PR reviewed by both the client and server owners.
+## Data model notes
 
 ### Account to student link
 

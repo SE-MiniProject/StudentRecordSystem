@@ -64,29 +64,36 @@ docker compose --profile dev down
 
 ### Web tests
 
-The web unit tests use Node.js's built-in test runner:
+The web unit tests use Node.js's built-in test runner. From the repository root:
 
 ```sh
 cd web
+npm ci
 npm test
 ```
 
 ### Backend tests
 
-The backend test suite is built with CMake and run with CTest. It requires:
+The C++ backend tests are built with CMake and run with CTest. Route tests use in-memory stores; the PostgreSQL store integration tests run when `SRS_TEST_DATABASE_URL` points to a disposable database with the project migrations applied. Without that variable, those integration tests are skipped.
+
+The build requires:
 
 - A C++20 toolchain
 - CMake
 - OpenSSL development files
 - PostgreSQL client development files
-- A reachable PostgreSQL database configured through `DATABASE_URL`
-
-The backend tests also require the database fixtures used by the test suite.
 
 ```sh
 cmake -S server -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
+```
+
+To run the PostgreSQL store integration tests, set `SRS_TEST_DATABASE_URL` to a disposable migrated test database when invoking CTest:
+
+```sh
+SRS_TEST_DATABASE_URL='postgresql://postgres:postgres@localhost:5432/srs_test' \
+  ctest --test-dir build --output-on-failure
 ```
 
 ### Browser smoke tests
@@ -97,6 +104,20 @@ Install the web test dependencies required by `web/tests/smoke.mjs`, then run:
 cd web
 npm run test:smoke
 ```
+
+### Playwright system tests
+
+The Playwright suite exercises the HTTPS app against seeded PostgreSQL data. It creates, searches, updates, and deletes one uniquely named temporary student; the cleanup request targets only that record if a UI step fails. Run against an isolated test Compose database. The suite captures screenshots and writes its HTML report and artifacts under `docs/reports/`.
+
+Start the development app and wait for the seed jobs to complete. Then, from `web/`, run:
+
+```sh
+npm ci
+npx playwright install chromium
+npm run test:e2e
+```
+
+See [web/e2e/README.md](web/e2e/README.md) for base URL, browser, and fixture credential settings.
 
 ## Repository layout
 
