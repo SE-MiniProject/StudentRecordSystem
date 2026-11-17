@@ -1,4 +1,4 @@
-# Student Record System
+# Student Record System.
 
 A web-based student record management system with role-based access for administrators, teachers, and students. The C++ server provides the REST API and serves the browser client from the same origin; PostgreSQL stores application data.
 
